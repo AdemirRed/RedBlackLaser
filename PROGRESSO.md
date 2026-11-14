@@ -689,6 +689,10 @@ laser desligado.
 - Regras para projetos criados: corte 800 mm/min, potência máx. 85 % (nunca 100 %); encaixes SEM folga (rasgo =
   soma das espessuras). Carroça: furos Ø4 (= vareta), abas 3 mm. Porta-retrato todo em MDF 3 mm: rasgos da base
   26 × 9 (3 + 3 + 3), base em 3 camadas de 3 mm, 4 triângulos de apoio.
+- tools/projetos/etiquetas.py: grava o código de cada peça dentro dela (lugar livre mais central, longe de furos e
+  linhas; gira junto com a peça), camada C09 15 %/3000 mm/min antes dos cortes + aba "SÓ LETRAS" para chapa já
+  cortada. tools/projetos/carroca_manual.py: manual de montagem em PDF (lista de peças, mapa da chapa, assoalho como
+  mapa dos rasgos, passo a passo, vistas lateral e de frente, meio-encaixe). O gerador da carroça já sai com letras.
 
 ## Concluído antes
 - Etapa 12 — simulador GRBL (aprovada em 2026-11-07).

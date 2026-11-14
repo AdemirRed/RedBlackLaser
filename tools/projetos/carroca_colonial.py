@@ -241,16 +241,22 @@ def peca(partes, nome, x, y):
     return g.snapshot()
 
 
+LETRAS_EXTRAS = {"P1": "P1  FRENTE →", "B1": "B1 TRÁS", "B2": "B2 FRENTE", "T1": "T1 TRÁS", "T2": "T2 FRENTE"}
+
+
 def gerar(destino):
     paginas = [tuple(peca(*p) for p in pecas) for _, pecas in FOLHAS]
     atual = 1  # abre na folha da carroça; None marca a página atual (vai em snapshots)
     pj.save(destino, paginas[atual], camadas(), notas=NOTAS,
             paginas=[None if i == atual else (p, (), ()) for i, p in enumerate(paginas)],
             pagina_atual=atual, nomes_paginas=[n for n, _ in FOLHAS])
+    import etiquetas  # código gravado em cada peça (15 %, 3000 mm/min, antes dos cortes) + abas "SÓ LETRAS"
+    etiquetas.etiquetar(destino, destino, LETRAS_EXTRAS)
     return destino
 
 
 if __name__ == "__main__":
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     print(gerar(sys.argv[1] if len(sys.argv) > 1 else "carroca_colonial_3mm.rbl"))

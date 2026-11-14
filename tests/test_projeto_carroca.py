@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 sys.path.insert(0, os.path.join(RAIZ, "tools", "projetos"))
@@ -13,6 +14,7 @@ from PySide6.QtCore import QRectF, QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import carroca_colonial as cc  # noqa: E402
+import etiquetas as et  # noqa: E402
 from redblack import gcode as gc  # noqa: E402
 from redblack import geometria as g  # noqa: E402
 from redblack import objetos as ob  # noqa: E402
@@ -84,13 +86,15 @@ class CarrocaTest(unittest.TestCase):
             try:
                 g.definir_mesa(365, 370)
                 self.assertTrue(w.open_path(arq))
-                self.assertEqual(w.nomes_paginas, [n for n, _ in cc.FOLHAS])
+                nomes = [n for n, _ in cc.FOLHAS]
+                self.assertEqual(w.nomes_paginas, nomes + [f"SÓ LETRAS de {n} (não mover a chapa)" for n in nomes])
                 for i in range(len(w.paginas)):
                     w.ir_para_pagina(i)
                     pecas = [s for s in w.canvas.view.shapes()]
                     r = ob.bounds(pecas)
                     self.assertTrue(r.left() >= 0 and r.top() >= 0 and r.right() <= 365 and r.bottom() <= 370,
                                     (w.nomes_paginas[i], r))
+                    pecas = [s for s in pecas if s.layer != et.CAMADA]  # letras ficam por cima das peças
                     caixas = [ob.bounds([s]).adjusted(1, 1, -1, -1) for s in pecas]  # folga mínima de 2 mm
                     for a in range(len(caixas)):
                         for b in range(a + 1, len(caixas)):
@@ -102,12 +106,40 @@ class CarrocaTest(unittest.TestCase):
                         txt = f.read()
                     info = gc.analisar(txt)
                     self.assertTrue(info["dentro_da_area"] and info["fim_desligado"])
+                    if "SÓ LETRAS" in w.nomes_paginas[i]:  # só grava, nada de corte
+                        self.assertNotIn("; Camada C01", txt)
+                        continue
+                    self.assertLess(txt.index("; Camada C09"), txt.index("; Camada C02"))  # letras antes dos cortes
                     self.assertLess(txt.index("; Camada C02"), txt.index("; Camada C01"))
                     if "; Camada C03" in txt:
                         self.assertLess(txt.index("; Camada C03"), txt.index("; Camada C02"))
             finally:
                 g.definir_mesa(400, 400)
                 w.close()
+
+    def test_letras_dentro_das_pecas(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(cc.gerar(os.path.join(tmp, "c.rbl")), encoding="utf-8") as f:
+                d = json.load(f)
+        objs = d["paginas"][1]["objetos"] if d["paginas"][1] else d["objetos"]
+        pecas = {et.CODIGO.match(o["nome"]).group(1): o for o in objs if o["tipo"] == "grupo"}
+        letras = {o["nome"].split()[-1]: o for o in objs if o["tipo"] == "texto"}
+        self.assertEqual(set(letras), set(pecas))  # 35 peças, 35 letras
+        for cod, o in pecas.items():
+            t = letras[cod]
+            self.assertEqual((t["camada"], t["texto"]["altura_mm"] >= 1.8), (et.CAMADA, True))
+            p = et.folhas(t, et.matriz(t))[0][0]
+            partes = et.folhas(o, et.matriz(o))
+            cont = max((q for q, lid in partes if lid == cc.CONT), key=lambda q: q.boundingRect().width())
+            self.assertTrue(cont.contains(p.boundingRect()), cod)
+            for q, lid in partes:
+                if lid == cc.FURO:
+                    self.assertFalse(q.intersects(p), cod)
+        self.assertEqual(letras["P1"]["texto"]["texto"], "P1  FRENTE →")
+        camada = next(c for c in d["camadas"] if c["id"] == et.CAMADA)
+        self.assertEqual((camada["velocidade_mm_min"], camada["potencia_max"], d["camadas"][0]["id"]),
+                         (3000, 15, et.CAMADA))
 
 
 if __name__ == "__main__":
