@@ -1,0 +1,30 @@
+﻿RedBlack Laser 0.50.0
+© 2026 RedBlack. Todos os direitos reservados.
+Desenvolvido pela RedBlack com o assistente de IA Claude Opus (Anthropic).
+
+TERMOS DE USO
+
+1. Você pode instalar e usar o RedBlack Laser gratuitamente, para fins pessoais ou profissionais.
+2. Você pode compartilhar este instalador com outras pessoas, desde que sem alterações e sem cobrar por ele.
+3. Não é permitido vender, modificar, descompilar ou redistribuir o programa com outro nome.
+4. O programa é fornecido "como está", SEM GARANTIA de qualquer tipo. A RedBlack não se responsabiliza por
+   danos a pessoas, máquinas, materiais ou arquivos decorrentes do uso.
+
+SEGURANÇA DO LASER
+
+Este programa gera arquivos G-code para gravadoras a laser. Os valores de máquina e de materiais NÃO foram
+validados. Antes de qualquer trabalho: confira o arquivo, faça testes em material de sobra, use óculos de
+proteção adequados ao comprimento de onda do seu laser, mantenha ventilação e extintor por perto e nunca deixe
+a máquina funcionando sem supervisão.
+
+COMPONENTES DE TERCEIROS
+
+O RedBlack Laser usa o Qt for Python (PySide6) e as bibliotecas Qt, distribuídos sob a licença GNU LGPL
+versão 3 (https://www.gnu.org/licenses/lgpl-3.0.html). As bibliotecas Qt são incluídas como arquivos
+separados (DLLs) na pasta do programa e podem ser substituídas pelo usuário. Código-fonte do Qt:
+https://download.qt.io/. Python: licença PSF (https://docs.python.org/3/license.html).
+pypdf (leitura de PDF): licença BSD de 3 cláusulas, © Mathieu Fenniak e colaboradores
+(https://github.com/py-pdf/pypdf).
+
+O RedBlack Laser é um programa independente. Não é afiliado, patrocinado nem endossado pela LightBurn
+Software, LLC. Todas as marcas citadas pertencem aos seus donos.

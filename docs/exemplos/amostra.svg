@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Amostra para conferir a importação: medidas esperadas em mm estão nos ids. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="120mm" height="80mm" viewBox="0 0 120 80">
+  <title>Amostra RedBlack Laser</title>
+  <rect id="moldura-100x60mm" x="10" y="10" width="100" height="60" rx="5"/>
+  <circle id="circulo-d20mm" cx="30" cy="40" r="10"/>
+  <g transform="translate(60 40) rotate(45)">
+    <rect id="quadrado-10mm-girado-45" x="-5" y="-5" width="10" height="10"/>
+  </g>
+  <path id="arco-semicirculo-d20mm" d="M80 45 a10 10 0 0 1 20 0"/>
+  <text x="15" y="75">Texto: sem suporte nesta etapa</text>
+</svg>
