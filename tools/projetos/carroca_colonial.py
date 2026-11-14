@@ -31,6 +31,8 @@ GRAV, FURO, CONT = "C03", "C02", "C01"
 H_LAT = 56.9                                  # altura da lateral (sem as abas)
 ABAS_LAT = (12.5, 58.5, 104.5, 150.5)         # início (x) das 4 abas 7 × 4 da lateral = rasgos do assoalho
 EIXOS = (36.0, 137.0)                         # berços/eixos no assoalho (x = 0 no fundo traseiro)
+T = 3.0                                       # espessura do MDF: rasgos e abas = T, sem folga
+VARETA = 4.0                                  # eixos Ø4: furos das rodas e mancais = Ø4, sem folga
 
 
 def poligono(pts):
@@ -66,7 +68,7 @@ def lateral():
     """L1-L2: 170 × 56,9 com 4 abas 7 × 4 embaixo; 2 linhas de tábua gravadas."""
     pts = [(0, 0), (170, 0), (170, H_LAT)]
     for x in reversed(ABAS_LAT):
-        pts += [(x + 7, H_LAT), (x + 7, H_LAT + 4), (x, H_LAT + 4), (x, H_LAT)]
+        pts += [(x + 7, H_LAT), (x + 7, H_LAT + T), (x, H_LAT + T), (x, H_LAT)]
     pts.append((0, H_LAT))
     return [(linha(4, H_LAT * k / 3, 166, H_LAT * k / 3), GRAV) for k in (1, 2)] + [(poligono(pts), CONT)]
 
@@ -103,9 +105,9 @@ def tampa():
 
 
 def roda(d, ri, ro):
-    """Roda inteiriça: Ø d, furo Ø3,85, 8 janelas (setor de anel ri..ro, 21° de abertura) entre 8 raios."""
+    """Roda inteiriça: Ø d, furo Ø4 (= vareta, sem folga), 8 janelas (setor de anel ri..ro, 21° de abertura) entre 8 raios."""
     c = d / 2
-    furos = [circulo(c, c, 3.85)]
+    furos = [circulo(c, c, VARETA)]
     for k in range(8):
         a0, a1 = 12 + 45 * k, 33 + 45 * k  # graus a partir do topo, sentido horário
         pts = []
@@ -128,10 +130,10 @@ def berco():
 
 
 def mancal(corpo, furo_y):
-    """E1-E4: 30 × corpo + 2 abas 6 × 3 em cima; meio-encaixe 3 × 5 no centro; furo Ø4,30 a furo_y do topo."""
+    """E1-E4: 30 × corpo + 2 abas 6 × 3 em cima; meio-encaixe 3 × 5 no centro; furo Ø4 (vareta) a furo_y do topo."""
     pts = [(0, 3), (4, 3), (4, 0), (10, 0), (10, 3), (13.5, 3), (13.5, 8), (16.5, 8), (16.5, 3), (20, 3),
            (20, 0), (26, 0), (26, 3), (30, 3), (30, 3 + corpo), (0, 3 + corpo)]
-    return [(circulo(15, 3 + furo_y, 4.3), FURO), (poligono(pts), CONT)]
+    return [(circulo(15, 3 + furo_y, VARETA), FURO), (poligono(pts), CONT)]
 
 
 def lanca():
@@ -146,8 +148,8 @@ def banco():
 
 
 def suporte_banco():
-    """A2-A3: 15 × 23 + aba 5 × 3,8 (entra no rasgo 5 × 3 do assoalho)."""
-    return [(poligono([(5, 0), (10, 0), (10, 3.8), (15, 3.8), (15, 26.8), (0, 26.8), (0, 3.8), (5, 3.8)]), CONT)]
+    """A2-A3: 15 × 23 + aba 5 × 3 (entra no rasgo 5 × 3 do assoalho; aba = espessura, sem sobra)."""
+    return [(poligono([(5, 0), (10, 0), (10, T), (15, T), (15, 23 + T), (0, 23 + T), (0, T), (5, T)]), CONT)]
 
 
 def tira(w, h):
@@ -200,10 +202,10 @@ O PDF só trazia o plano como imagem: vetores refeitos pelas cotas da tabela (pr
 Mudança: assoalho com 4 recortes 3 × 4 na borda para os braços dos berços (no PDF eles se cruzavam).
 
 ANTES DE CORTAR
-1. Meça a chapa com paquímetro. Corte a aba "00 Calibrador Q1": ranhuras 2,80 / 2,90 / 3,00 / 3,10 (esq.→dir.)
-   e furos Ø3,85 (roda: vareta colada) / 4,00 / 4,30 (mancal: vareta gira).
-2. Se a ranhura boa não for 3,00, use Organizar → Redimensionar slots e/ou o Kerf da camada.
-3. Velocidade/potência das camadas são PONTO DE PARTIDA não validado (MDF 3 mm).
+1. Encaixes SEM folga: rasgos e abas = 3,00 (espessura); furos das rodas e mancais Ø4,00 (vareta de 4 mm).
+   Calibrador Q1 (aba 00, opcional): ranhuras 2,80 a 3,10 e furos Ø3,85 / 4,00 / 4,30 para conferir a chapa.
+2. Se a chapa real não tiver 3,00, use Organizar → Redimensionar slots e/ou o Kerf da camada.
+3. Corte: 800 mm/min, 85 %, 2 passadas (nunca 100 %); gravação 3000 mm/min, 15 %. Teste antes.
 C03 = gravação das tábuas (1º), C02 = furos/rasgos/janelas (2º), C01 = contornos (por último).
 
 MONTAGEM (não colar tampas nem eixos)
@@ -219,7 +221,7 @@ MONTAGEM (não colar tampas nem eixos)
 
 
 def camadas():
-    corte = dict(modo="linha", velocidade_mm_min=300.0, potencia_max=100.0, potencia_min=0.0, passadas=1, air=True)
+    corte = dict(modo="linha", velocidade_mm_min=800.0, potencia_max=85.0, potencia_min=0.0, passadas=2, air=True)
     return [cm.alterar(cm.Camada(GRAV, "Gravação: linhas das tábuas (1º)"), modo="linha", velocidade_mm_min=3000.0,
                        potencia_max=15.0, potencia_min=0.0, passadas=1),
             cm.alterar(cm.Camada(FURO, "Internos: furos, rasgos e janelas (corte, 2º)"), **corte),

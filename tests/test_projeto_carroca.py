@@ -32,7 +32,7 @@ def furos(partes):
 
 class CarrocaTest(unittest.TestCase):
     def test_medidas_da_tabela(self):
-        self.assertEqual(caixa(cc.lateral()), (170, 60.9))          # 170 × 56,9 + abas de 4
+        self.assertEqual(caixa(cc.lateral()), (170, 59.9))          # 170 × 56,9 + abas de 3 (sem folga)
         self.assertEqual(caixa(cc.assoalho()), (170, 66))
         self.assertEqual(caixa(cc.tampa()), (71.8, 56))
         self.assertEqual(caixa(cc.roda(58, 9, 23.25)), (58, 58))
@@ -41,10 +41,14 @@ class CarrocaTest(unittest.TestCase):
         self.assertEqual(caixa(cc.mancal(22, 14)), (30, 25))        # 30 × 22 + abas
         self.assertEqual(caixa(cc.mancal(28, 20)), (30, 31))
         self.assertEqual(caixa(cc.banco()), (60, 17))
-        self.assertEqual(caixa(cc.suporte_banco()), (15, 26.8))     # 15 × 23 + aba 3,8
+        self.assertEqual(caixa(cc.suporte_banco()), (15, 26))       # 15 × 23 + aba 3 (= espessura)
         self.assertEqual(caixa(cc.calibrador()), (48, 31))
-        self.assertEqual([round(r.width(), 2) for r in furos(cc.roda(58, 9, 23.25))[:1]], [3.85])
-        self.assertEqual([round(r.width(), 2) for r in furos(cc.mancal(22, 14))], [4.3])
+        self.assertEqual([round(r.width(), 2) for r in furos(cc.roda(58, 9, 23.25))[:1]], [4.0])  # = vareta
+        self.assertEqual([round(r.width(), 2) for r in furos(cc.mancal(22, 14))], [4.0])
+        for c in cc.camadas():  # corte 800 mm/min; nunca acima de 85 %
+            self.assertLessEqual(c.potencia_max, 85)
+            if c.id != cc.GRAV:
+                self.assertEqual((c.velocidade_mm_min, c.potencia_max), (800, 85))
         self.assertEqual(sorted(round(r.width(), 2) for r in furos(cc.calibrador())[:4]), [2.8, 2.9, 3.0, 3.1])
         self.assertEqual(len(furos(cc.roda(46, 8.1, 17.9))), 9)     # furo + 8 janelas
         nomes = [n for _, pecas in cc.FOLHAS for _, n, _, _ in pecas]

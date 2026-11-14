@@ -30,25 +30,26 @@ class PortaRetratoTest(unittest.TestCase):
         coracao = fm.ellipse_path(QRectF(20, 20, 10, 10))
         furo = fm.ellipse_path(QRectF(23, 23, 2, 2))  # furo dentro do coração
         outro = fm.rect_path(QRectF(200, 0, 20, 20))  # outra peça solta
-        res = pr.classificar([contorno, janela, coracao, furo, outro], 6)
+        res = pr.classificar([contorno, janela, coracao, furo, outro], 3)
         self.assertEqual([lid for _, lid, _ in res], ["C01", "C02", "C03", "C07", "C01"])
         self.assertEqual([d for *_, d in res], [0, 0, 2, 2, 4])  # janela é do contorno; furo é do coração
-        self.assertEqual(pr.classificar([contorno, janela], 3)[1][1], "C05")
+        for c in pr.camadas():  # corte 800 mm/min, nunca acima de 85 %
+            self.assertEqual((c.velocidade_mm_min, c.potencia_max), (800, 85))
 
-    def test_base_6mm_substitui_as_duas_camadas_de_cima(self):
-        partes = [pr.parte_base_6mm(a, b) for a, b in zip(pr.CORTES_BASE_6, pr.CORTES_BASE_6[1:])]
+    def test_camada_de_cima_da_base_sem_folga(self):
+        partes = [pr.parte_base(a, b) for a, b in zip(pr.CORTES_BASE, pr.CORTES_BASE[1:])]
         self.assertEqual(sum(p[0].boundingRect().width() for p in partes), 426)
-        rasgos = sorted(round(a + r.boundingRect().x(), 3) for a, p in zip(pr.CORTES_BASE_6, partes) for r in p[1:])
+        rasgos = sorted(round(a + r.boundingRect().x(), 3) for a, p in zip(pr.CORTES_BASE, partes) for r in p[1:])
         self.assertEqual(rasgos, list(pr.RASGOS_BASE))
         for p in partes:
             for r in p[1:]:
-                self.assertEqual((r.boundingRect().y(), r.boundingRect().width(), r.boundingRect().height()), (13, 26, 12))
-        self.assertTrue(all(abs(c - 142) > 20 for c in pr.CORTES_BASE_6[1:-1]))  # emendas desencontradas
+                self.assertEqual((r.boundingRect().y(), r.boundingRect().width(), r.boundingRect().height()), (13, 26, 9))  # 3 + 3 + 3
+        self.assertTrue(all(abs(c - 142) > 20 for c in pr.CORTES_BASE[1:-1]))  # emendas desencontradas
 
     @unittest.skipUnless(os.path.exists(PDF), "PDF do porta-retrato não disponível")
     def test_sobras_das_janelas(self):
         subs = pr.otimizar(pr.ler_pdf(PDF))
-        for n, esp in ((5, 6), (6, 6)):
+        for n, esp in ((5, 3), (6, 3)):
             itens = pr.classificar(subs[n], esp)
             janela = next(s for s, lid, _ in itens if lid == "C02" and s.boundingRect().width() > 140)
             jr = janela.boundingRect().adjusted(2, 2, -2, -2)
@@ -57,10 +58,14 @@ class PortaRetratoTest(unittest.TestCase):
                 self.assertTrue(jr.contains(a.boundingRect()), (n, a.boundingRect()))  # 2 mm de folga da janela
                 for b in pecas[i + 1:]:  # área real (o par de triângulos divide a mesma caixa, como no PDF)
                     self.assertFalse(a.intersects(b), (n, a.boundingRect(), b.boundingRect()))
-        coracoes = sum(1 for n in (5, 6) for s, lid, _ in pr.classificar(subs[n], 6)
+        coracoes = sum(1 for n in (5, 6) for s, lid, _ in pr.classificar(subs[n], 3)
                        if lid == "C03" and s.elementCount() > 50)
         self.assertEqual(coracoes, 18)
-        self.assertEqual(len(subs[9]), 1)  # só a base lisa de 142 sobra para um retalho de 3 mm
+        # aba 9: base lisa 142, camada do meio 205 + 221 (2 rasgos 26 × 9 cada) e um par de triângulos
+        caixas9 = sorted((round(s.boundingRect().width(), 2), round(s.boundingRect().height(), 2)) for s in subs[9])
+        self.assertEqual(caixas9, [(26, 9)] * 4 + [(36, 36)] * 2 + [(142, 62), (205, 62), (221, 62)])
+        triangulos = [s for n in (6, 9) for s in subs[n] if round(s.boundingRect().width()) == 36]
+        self.assertEqual(len(triangulos), 4)  # 2 apoios = 4 triângulos de 3 mm colados aos pares
         r8 = [s.boundingRect() for s in subs[8] if pr.profundidades([s] + subs[8])[0] == 0]
         for i, a in enumerate(r8):
             self.assertTrue(QRectF(0, 0, 365, 370).contains(a))
@@ -86,7 +91,7 @@ class PortaRetratoTest(unittest.TestCase):
                         txt = f.read()
                     info = gc.analisar(txt)
                     self.assertTrue(info["dentro_da_area"] and info["fim_desligado"], w.nomes_paginas[i])
-                    ordem = [txt.find(f"; Camada {c}") for c in ("C07", "C03", "C02", "C01", "C08", "C06", "C05", "C04")]
+                    ordem = [txt.find(f"; Camada {c}") for c in ("C07", "C03", "C02", "C01")]
                     presentes = [p for p in ordem if p >= 0]
                     self.assertEqual(presentes, sorted(presentes), w.nomes_paginas[i])
             finally:

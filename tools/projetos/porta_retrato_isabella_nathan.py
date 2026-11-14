@@ -7,16 +7,16 @@ cada contorno fechado é classificado pela profundidade (quantos contornos o env
   3 = furo/rasgo dessa peça. Corta-se do mais fundo para fora: se a janela sai antes, a sobra cai e a peça de
   dentro sai torta.
 
-OTIMIZAÇÃO (aproveitamento das sobras das janelas, MDF 6 mm) — tudo equivalente ao projeto do PDF:
-- Apoios: o PDF cola 4 triângulos de 3 mm aos pares (2 apoios de 6 mm). Aqui saem 2 triângulos de 6 mm, dentro da
-  janela direita.
-- Base: as duas camadas de cima (3 + 3 mm, ambas com os 4 rasgos 26 × 12 que recebem as linguetas de 6 mm de
-  profundidade) viram UMA camada de 6 mm em 3 partes (0-100, 100-290, 290-426 mm; emendas fora dos rasgos e longe
-  da emenda da camada de baixo, a 142), dentro das janelas.
-- Os 6 corações da janela direita vão para a esquerda (a janela direita recebe as duas partes maiores da base).
-- No MDF 3 mm sobram só fundos, camada lisa de baixo da base, guias, batentes, chapinhas e coroa: cabem na folha 8,
-  menos a parte de 142 × 62 da base, que fica sozinha na aba 9 (corte de qualquer retalho de 3 mm).
-Camadas MDF 6: C07 → C03 → C02 → C01. MDF 3: C08 → C06 → C05 → C04.
+TUDO EM MDF 3 mm, SEM FOLGA (o PDF foi desenhado com frente de 6 mm): os encaixes somam as espessuras.
+- Área das fotos: frente 3 + guia 3 + fundo 3 = 9 mm -> rasgos da base 26 × 9 (no PDF, 26 × 12).
+- Base 426 × 62 × 9 = 3 camadas de 3 mm: cima e meio com os 4 rasgos (as linguetas entram 6 mm), baixo lisa.
+APROVEITAMENTO das sobras das janelas (tudo é 3 mm, então qualquer peça cabe nelas):
+- Janela direita: camada de CIMA da base, partes 0-100 e 100-290 + 1 par de triângulos (apoios).
+- Janela esquerda: os 18 corações + parte 290-426 da camada de cima.
+  (emendas da camada de cima em 100 e 290, fora dos rasgos e longe das de baixo: 142 e meio: 205)
+- Aba 8: fundos, base lisa 284, guias, batentes, chapinhas e coroa. Aba 9: base lisa 142, camada do meio
+  (205 + 221, do PDF) e o outro par de triângulos.
+Camadas (todas 3 mm, corte 800 mm/min, 85 %, 2 passadas): C07 → C03 → C02 → C01.
 
 Executar:  python tools/projetos/porta_retrato_isabella_nathan.py <arquivo.pdf> [saida.rbl]
 """
@@ -35,14 +35,16 @@ from redblack import objetos as ob  # noqa: E402
 from redblack import projeto as pj  # noqa: E402
 
 # (página do PDF, 1 = primeira; nome da aba; espessura)
-FOLHAS = [(5, "5 Frente esquerda + sobras (MDF 6)", 6), (6, "6 Frente direita NATHAN + sobras (MDF 6)", 6),
-          (7, "7 Faixa ISABELLA (MDF 6)", 6), (8, "8 Fundos, base, guias e coroa (MDF 3)", 3),
-          (9, "9 Retalho: base inferior 142 (MDF 3)", 3)]
+FOLHAS = [(5, "5 Frente esquerda + sobras (MDF 3)", 3), (6, "6 Frente direita NATHAN + sobras (MDF 3)", 3),
+          (7, "7 Faixa ISABELLA (MDF 3)", 3), (8, "8 Fundos, base, guias e coroa (MDF 3)", 3),
+          (9, "9 Base meio, base 142 e apoios (MDF 3)", 3)]
 # por profundidade 0, 1, 2, 3+
-CAMADAS = {6: ("C01", "C02", "C03", "C07"), 3: ("C04", "C05", "C06", "C08")}
+CAMADAS = {3: ("C01", "C02", "C03", "C07")}
+T = 3.0                       # MDF 3 mm em todas as peças
+RASGO = 3 * T                 # frente + guia + fundo empilhados: sem folga, só a soma das espessuras
 BASE = 426.0
-RASGOS_BASE = (49.0, 123.0, 231.0, 357.0)  # início (x) dos rasgos 26 × 12, a 13 mm da borda (PDF p. 3)
-CORTES_BASE_6 = (0.0, 100.0, 290.0, BASE)   # partes da camada de 6 mm
+RASGOS_BASE = (49.0, 123.0, 231.0, 357.0)  # início (x) dos rasgos 26 × RASGO, a 13 mm da borda (PDF p. 3)
+CORTES_BASE = (0.0, 100.0, 290.0, BASE)     # partes da camada de cima da base (nas janelas)
 
 
 def profundidades(subs):
@@ -109,9 +111,9 @@ def _peca_com_furos(subs, w, h):
     return [cont] + furos
 
 
-def parte_base_6mm(x0, x1):
-    """Parte da camada de 6 mm da base, de x0 a x1 (mm ao longo dos 426), com os rasgos que caem nela."""
-    rasgos = [_ret(r - x0, 13, 26, 12) for r in RASGOS_BASE if x0 <= r and r + 26 <= x1]
+def parte_base(x0, x1):
+    """Parte da camada de cima da base, de x0 a x1 (mm ao longo dos 426), com os rasgos que caem nela."""
+    rasgos = [_ret(r - x0, 13, 26, RASGO) for r in RASGOS_BASE if x0 <= r and r + 26 <= x1]
     assert all(not (r < x < r + 26) for r in RASGOS_BASE for x in (x0, x1)), "emenda dentro de um rasgo"
     return [_ret(0, 0, x1 - x0, 62)] + rasgos
 
@@ -124,10 +126,10 @@ def otimizar(subs):
     coracoes = [s for s in s6 if s is not janela6 and janela6.boundingRect().contains(s.boundingRect())]
     for c in coracoes:
         s6.remove(c)
-    p1, p2, p3 = (parte_base_6mm(a, b) for a, b in zip(CORTES_BASE_6, CORTES_BASE_6[1:]))
+    p1, p2, p3 = (parte_base(a, b) for a, b in zip(CORTES_BASE, CORTES_BASE[1:]))
     s6 += _mover(p2, 32, 81) + _mover(p1, 32, 147)
-    triangulos = _tirar(s9, 36, 36)  # 4 de 3 mm (2 pares)
-    par = sorted(triangulos, key=lambda t: t.boundingRect().x())[:2]  # um par = 2 triângulos complementares
+    triangulos = sorted(_tirar(s9, 36, 36), key=lambda t: t.boundingRect().x())  # 4 de 3 mm (2 pares)
+    par, outro_par = triangulos[:2], triangulos[2:]  # cada par = 2 triângulos complementares
     s6 += _mover(par, 140, 160)
     # janela esquerda: os 6 corações ao lado dos 12 e a terceira parte da base embaixo
     destino = {43.96: (112, 21), 30.87: (110, 67), 18.91: (143, 67), 18.89: (143, 87), 24.9: (110, 98),
@@ -136,9 +138,14 @@ def otimizar(subs):
         w = round(c.boundingRect().width(), 2)
         s5 += _mover([c], *destino[w])
     s5 += _mover(p3, 25, 148)
-    # MDF 3: sai a base de cima/meio (3 mm), entram na folha 8 as guias, batentes, chapinhas e coroa
-    for w in (146, 205, 221, 280):
+    # aba 9: sai a camada de cima do PDF (280 + 146, refeita nas janelas); a do meio (205 + 221) fica, rasgos 26 × 9
+    for w in (146, 280):
         _peca_com_furos(s9, w, 62)
+    meio = [_peca_com_furos(s9, w, 62) for w in (205, 221)]
+    for pecas in meio:
+        for i, f in enumerate(pecas[1:], 1):
+            r = f.boundingRect()
+            pecas[i] = _ret(r.x(), r.y(), r.width(), RASGO)  # 26 × 12 -> 26 × 9, mesma borda de cima
     guias = [_peca_com_furos(s9, w, h) for w, h in ((14.4, 159.5), (10.4, 159.5), (4.4, 223.5), (10.4, 223.5))]
     y = 316.0
     for g in guias:  # deitadas embaixo da base de 284
@@ -153,7 +160,7 @@ def otimizar(subs):
         s8 += _mover(pecas, x, yy)
     sobra = _peca_com_furos(s9, 142, 62)
     assert not s9, f"peças da folha 9 não realocadas: {[s.boundingRect() for s in s9]}"
-    s9 += _mover(sobra, 5, 5)
+    s9 += _mover(sobra, 5, 5) + _mover(meio[0], 5, 71) + _mover(meio[1], 5, 137) + _mover(outro_par, 151, 5)
     return subs
 
 
@@ -179,22 +186,21 @@ def folha(subs, esp):
     return tuple(snaps)
 
 
-NOTAS = """PORTA-RETRATO ISABELLA E NATHAN — fotos 15 × 21 (em pé, esquerda) e 21 × 15 (deitada, direita)
-Vetores importados 1:1 das páginas 5 a 9 do PDF. Moldura 414 mm; base 426 × 62 × 9; altura montada 307 mm.
+NOTAS = """PORTA-RETRATO ISABELLA E NATHAN — TUDO EM MDF 3 mm — fotos 15 × 21 (esquerda) e 21 × 15 (direita)
+Vetores 1:1 do PDF (desenhado para frente de 6 mm), adaptados para 3 mm SEM folga: os encaixes somam as espessuras.
 
-APROVEITAMENTO DAS JANELAS (diferente do PDF, mesma montagem)
-- Janela esquerda: 18 corações + parte 290-426 da base de 6 mm (rasgo em 357).
-- Janela direita: partes 0-100 (rasgo em 49) e 100-290 (rasgos em 123 e 231) da base de 6 mm + 2 triângulos de
-  6 mm (os apoios; no PDF eram 4 triângulos de 3 mm colados aos pares).
-- A camada de 6 mm substitui as DUAS camadas de cima da base (3 + 3 mm). Base = camada de 6 mm + camada lisa de
-  3 mm (142 + 284) embaixo; emendas desencontradas (100 e 290 em cima, 142 embaixo).
-- Folha de 3 mm: fundos, base lisa 284, guias, batentes, chapinhas e coroa juntos na aba 8; a parte 142 × 62 da
-  base lisa (aba 9) sai de qualquer retalho de 3 mm.
+O QUE MUDOU PARA 3 mm
+- Frentes, faixa ISABELLA e corações em 3 mm. Espessura na área das fotos: frente 3 + guia 3 + fundo 3 = 9 mm.
+- Rasgos da base: 26 × 9 (antes 26 × 12), em X 49, 123, 231, 357 / Y 13. Linguetas das frentes entram 6 mm
+  (as duas camadas de cima da base).
+- Base 426 × 62 × 9 = 3 camadas de 3 mm:
+  cima (com rasgos) = 3 partes nas janelas: 0-100 e 100-290 (janela direita), 290-426 (janela esquerda);
+  meio (com rasgos) = 0-205 e 205-426 (aba 9);
+  baixo (lisa) = 284 (aba 8) + 142 (aba 9). Emendas desencontradas: 100/290, 205, 142.
+- Apoios: 4 triângulos de 3 mm colados aos pares (2 na janela direita, 2 na aba 9).
 
-MATERIAL E ORDEM
-Abas 5, 6 e 7: MDF 6 mm. Camadas C07 (rasgos das peças nas janelas) → C03 (peças nas janelas) → C02 (janelas,
-letras, vazados) → C01 (contorno). Abas 8 e 9: MDF 3 mm. C08 → C06 → C05 → C04.
-Velocidade/potência das camadas são PONTO DE PARTIDA não validado: teste antes.
+CORTE (todas as camadas de corte): 800 mm/min, 85 %, 2 passadas — teste antes; ordem em cada aba: rasgos das
+peças internas → peças internas → janelas/letras/rasgos → contornos.
 
 MONTAGEM (do PDF)
 1 Frente modular: una os módulos com A1, C1-C3 e D1/D2. As 2 linguetas superiores da faixa ISABELLA entram no
@@ -202,23 +208,17 @@ MONTAGEM (do PDF)
   C1-C3 em X 159,5, Y 78/130/182 (31 × 22); D1-D2 em X 178 e 403, Y -10 (11 × 32). Ref.: topo esquerdo do
   quadro em pé.
 2 Canais e fundos: cole guias e fundos alinhados às linguetas. Canal esquerdo 211,2 mm; direito 151,2 mm.
-3 Base: cole a camada de 6 mm sobre a lisa de 3 mm, rasgos 26 × 12 em X 49, 123, 231, 357 / Y 13.
-  Teste o encaixe de 12 mm antes de colar.
-4 Apoios: os 2 triângulos de 6 mm, centrados a 62 e 244 mm da esquerda da base.
-  Corações conforme a vista frontal. Coroa (3 mm) colada sobre o último A."""
+3 Base: cole as 3 camadas (lisa embaixo), rasgos alinhados. Teste o encaixe das linguetas antes de colar.
+4 Apoios: cole os triângulos aos pares; apoios centrados a 62 e 244 mm da esquerda da base.
+  Corações conforme a vista frontal. Coroa colada sobre o último A."""
 
 
 def camadas():
-    seis = dict(modo="linha", velocidade_mm_min=300.0, potencia_max=100.0, potencia_min=0.0, passadas=2, air=True)
-    tres = dict(seis, passadas=1)
-    return [cm.alterar(cm.Camada("C07", "MDF 6: rasgos das peças nas janelas (1º)"), **seis),
-            cm.alterar(cm.Camada("C03", "MDF 6: peças dentro das janelas (2º)"), **seis),
-            cm.alterar(cm.Camada("C02", "MDF 6: janelas, letras e vazados (3º)"), **seis),
-            cm.alterar(cm.Camada("C01", "MDF 6: contornos (por último)"), **seis),
-            cm.alterar(cm.Camada("C08", "MDF 3: furos de peças dentro de vazados (1º)"), **tres),
-            cm.alterar(cm.Camada("C06", "MDF 3: peças dentro de vazados (2º)"), **tres),
-            cm.alterar(cm.Camada("C05", "MDF 3: furos e rasgos (3º)"), **tres),
-            cm.alterar(cm.Camada("C04", "MDF 3: contornos (por último)"), **tres)]
+    corte = dict(modo="linha", velocidade_mm_min=800.0, potencia_max=85.0, potencia_min=0.0, passadas=2, air=True)
+    return [cm.alterar(cm.Camada("C07", "MDF 3: rasgos das peças nas janelas (1º)"), **corte),
+            cm.alterar(cm.Camada("C03", "MDF 3: peças dentro das janelas (2º)"), **corte),
+            cm.alterar(cm.Camada("C02", "MDF 3: janelas, letras, furos e rasgos (3º)"), **corte),
+            cm.alterar(cm.Camada("C01", "MDF 3: contornos (por último)"), **corte)]
 
 
 def gerar(pdf, destino):

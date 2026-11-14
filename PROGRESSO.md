@@ -686,6 +686,9 @@ laser desligado.
   imagem; assoalho com recortes para os braços dos berços) e porta-retrato Isabella e Nathan (vetores 1:1 do PDF,
   camadas pela profundidade; base de 6 mm em 3 partes, apoios de 6 mm e corações dentro das sobras das janelas).
 - README novo (capturas em docs/img); referência completa movida para docs/GUIA.md. 632 testes passando.
+- Regras para projetos criados: corte 800 mm/min, potência máx. 85 % (nunca 100 %); encaixes SEM folga (rasgo =
+  soma das espessuras). Carroça: furos Ø4 (= vareta), abas 3 mm. Porta-retrato todo em MDF 3 mm: rasgos da base
+  26 × 9 (3 + 3 + 3), base em 3 camadas de 3 mm, 4 triângulos de apoio.
 
 ## Concluído antes
 - Etapa 12 — simulador GRBL (aprovada em 2026-11-07).
