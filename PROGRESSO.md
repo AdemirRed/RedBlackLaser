@@ -720,3 +720,8 @@ laser desligado.
   bomba no modo baixo (relé do M8 desligado); se aparecer FORTE e sair pouco ar, é o regulador da bomba/mangueira.
   Simulador agora guarda o M8 e informa Ov:/A:F.
 - Camada: caixa "↕ Varrer no eixo Y (linhas verticais)" = ângulo de varredura 90° (preenchimento e imagem).
+
+## 0.52.1 — fim dos pontinhos/furinhos (envio do trabalho)
+- O "ok" do GRBL agora manda a próxima linha NA HORA (readyRead da serial → `Conexao.tick(0)`), sem esperar o
+  relógio de 50 ms da tela. Antes, nos trechos curtos (curvas, linhas de gravação) o buffer de 127 bytes esvaziava, a
+  máquina parava a cada linha e o laser marcava pontinhos (M4) e furinhos (M3, corte).

@@ -6371,11 +6371,25 @@ class MainWindow(QMainWindow):
         else:
             tr = tp.TransporteSerial(porta, int(self.baud_combo.currentText()))
         self.conexao = cx.Conexao(tr, intervalo_status_s=0.12)  # ~8 leituras/s: mira acompanha melhor
+        tr.ao_chegar = self._dados_da_maquina
         self._log_visto = 0
         self.machine_log.clear()
         self.conexao.conectar()
         self._conexao_timer.start()
         self._atualizar_maquina()
+
+    def _dados_da_maquina(self):
+        """Chegou resposta na serial: durante o trabalho, lê os "ok" e manda as próximas linhas NA HORA (a tela só
+        atualiza no relógio). Esperar o relógio de 50 ms esvaziava o buffer do GRBL nos trechos curtos: a máquina
+        parava a cada linha e o laser deixava pontinhos na gravação e furinhos no corte."""
+        c = self.conexao
+        if c is None or c.trabalho != cx.TRABALHO_RODANDO or getattr(self, "_lendo_serial", False):
+            return  # o waitForReadyRead(0) do tick pode avisar de novo: nunca entra duas vezes
+        self._lendo_serial = True
+        try:
+            c.tick(0.0)
+        finally:
+            self._lendo_serial = False
 
     def _tick_conexao(self):
         if self.conexao:

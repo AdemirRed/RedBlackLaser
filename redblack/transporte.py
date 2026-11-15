@@ -32,6 +32,7 @@ class TransporteSerial:
         self.nome = f"{porta} @ {baud}"
         self._p = porta_qt
         self._buf = b""
+        self.ao_chegar = None  # chamado quando chegam bytes (readyRead)
         self._perdida = None
 
     @property
@@ -50,6 +51,10 @@ class TransporteSerial:
             p.setStopBits(QSerialPort.OneStop)
             p.setFlowControl(QSerialPort.NoFlowControl)
             p.errorOccurred.connect(self._erro)
+            # o "ok" do GRBL chega aqui na hora: quem conecta (a interface) já manda a próxima linha do trabalho,
+            # sem esperar o relógio de 50 ms — senão o buffer de 127 bytes esvazia, a máquina para a cada trecho
+            # curto e o laser deixa pontinhos (M4) ou furinhos (M3)
+            p.readyRead.connect(lambda: self.ao_chegar and self.ao_chegar())
             self._p = p
         if not self._p.isOpen() and not self._p.open(QIODevice.ReadWrite):
             raise TransporteErro(self._p.errorString())

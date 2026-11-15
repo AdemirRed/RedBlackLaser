@@ -315,6 +315,25 @@ class PainelControleTest(unittest.TestCase):
         self.ticks(20)
         self.assertIn("fraco", self.w.lbl_ar.text())
 
+    def test_ok_da_maquina_manda_a_proxima_linha_na_hora(self):
+        """Sem esperar o relógio da tela: senão o buffer do GRBL esvazia e o laser deixa pontinhos/furinhos."""
+        self.conectar()
+        self.w.ask_liberar_controle = lambda: True
+        self.w.btn_controle.setChecked(True)
+        self.w.create_shape(fm.ellipse_path(QRectF(20, 20, 60, 60)), "ellipse")
+        self.w.ask_confirmar_trabalho = lambda info, caixa: True
+        self.assertTrue(self.w.iniciar_trabalho())
+        self.ticks(10)
+        c = self.w.conexao
+        self.assertEqual(c.tr.ao_chegar, self.w._dados_da_maquina)
+        for _ in range(500):  # só a máquina anda (nenhum tick da tela): cada resposta já repõe o buffer
+            antes = c._job_i
+            c.tr.sim.avancar(0.02)
+            self.w._dados_da_maquina()
+            if c._job_i > antes:
+                break
+        self.assertGreater(c._job_i, antes)
+
     def test_varrer_no_eixo_y(self):
         self.w.create_shape(fm.rect_path(QRectF(10, 10, 20, 20)), "rect")
         self.w.layer_table.selectRow(0)
