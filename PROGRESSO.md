@@ -693,6 +693,10 @@ laser desligado.
   linhas; gira junto com a peça), camada C09 15 %/3000 mm/min antes dos cortes + aba "SÓ LETRAS" para chapa já
   cortada. tools/projetos/carroca_manual.py: manual de montagem em PDF (lista de peças, mapa da chapa, assoalho como
   mapa dos rasgos, passo a passo, vistas lateral e de frente, meio-encaixe). O gerador da carroça já sai com letras.
+- Manuais: porta-retrato (base laminada, encaixe, apoios) e gabarito 1:1 das laterais da carroça. Corações do
+  porta-retrato unidos numa peça de 3 mm (divisas gravadas fracas).
+- Versão 0.51.0. Predefinições de corte RedBlack: MDF 3 mm = 650 mm/min, 85 %, 2 passadas; MDF 6 mm = 600 mm/min,
+  85 %, 5 passadas (`materiais.corte_mdf`, usado pelos geradores de projeto).
 
 ## Concluído antes
 - Etapa 12 — simulador GRBL (aprovada em 2026-11-07).

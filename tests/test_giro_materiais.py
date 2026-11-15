@@ -134,7 +134,9 @@ class MateriaisTest(Base):
     def test_mdf_3mm_predefinido_e_editar_material(self):
         mats = self.win.materiais()
         pre = next(m for m in mats if m.nome == "MDF" and m.espessura_mm == 3 and m.operacao == "corte")
-        self.assertEqual((pre.potencia_max, pre.passadas), (80, 2))  # predefinição RedBlack
+        self.assertEqual((pre.velocidade_mm_min, pre.potencia_max, pre.passadas), (650, 85, 2))  # predefinição
+        seis = next(m for m in mats if m.nome == "MDF" and m.espessura_mm == 6 and m.operacao == "corte")
+        self.assertEqual((seis.velocidade_mm_min, seis.potencia_max, seis.passadas), (600, 85, 5))
         self.win._montar_materiais(mats.index(pre))
         self.assertFalse(self.win.btn_mat_excluir.isEnabled())  # predefinição não se exclui
         self.win.ask_valores = lambda t, campos, nota="": {**{k: d for k, _r, d, _o in campos},
@@ -142,7 +144,7 @@ class MateriaisTest(Base):
         self.assertTrue(self.win.editar_material(pre))
         novo = next(m for m in self.win.materiais() if m.nome == "MDF" and m.espessura_mm == 3
                     and m.operacao == "corte")
-        self.assertEqual((novo.velocidade_mm_min, novo.passadas, novo.potencia_max), (450.0, 3, 80))
+        self.assertEqual((novo.velocidade_mm_min, novo.passadas, novo.potencia_max), (450.0, 3, 85))
         self.assertEqual(sum(1 for m in self.win.materiais() if (m.nome, m.espessura_mm, m.operacao) ==
                              ("MDF", 3, "corte")), 1)  # o seu substitui a predefinição (não duplica)
 

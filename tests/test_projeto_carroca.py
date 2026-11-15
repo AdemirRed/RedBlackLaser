@@ -47,10 +47,10 @@ class CarrocaTest(unittest.TestCase):
         self.assertEqual(caixa(cc.calibrador()), (48, 31))
         self.assertEqual([round(r.width(), 2) for r in furos(cc.roda(58, 9, 23.25))[:1]], [4.0])  # = vareta
         self.assertEqual([round(r.width(), 2) for r in furos(cc.mancal(22, 14))], [4.0])
-        for c in cc.camadas():  # corte 800 mm/min; nunca acima de 85 %
+        for c in cc.camadas():  # corte 650 mm/min, 2 passadas; nunca acima de 85 %
             self.assertLessEqual(c.potencia_max, 85)
             if c.id != cc.GRAV:
-                self.assertEqual((c.velocidade_mm_min, c.potencia_max), (800, 85))
+                self.assertEqual((c.velocidade_mm_min, c.potencia_max, c.passadas), (650, 85, 2))
         self.assertEqual(sorted(round(r.width(), 2) for r in furos(cc.calibrador())[:4]), [2.8, 2.9, 3.0, 3.1])
         self.assertEqual(len(furos(cc.roda(46, 8.1, 17.9))), 9)     # furo + 8 janelas
         nomes = [n for _, pecas in cc.FOLHAS for _, n, _, _ in pecas]

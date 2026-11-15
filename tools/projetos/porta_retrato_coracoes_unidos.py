@@ -2,7 +2,7 @@
 
 Lê a vista frontal do PDF (p. 1, vetores em escala: base de 426 mm) e junta os corações de cada canto (12 embaixo à
 esquerda, 6 embaixo à direita) numa peça só, na posição do desenho. As divisas visíveis entre eles (o de cima esconde o
-de baixo) são gravadas fracas (15 %, 3000 mm/min); a união é cortada (800 mm/min, 85 %).
+de baixo) são gravadas fracas (15 %, 3000 mm/min); a união é cortada (650 mm/min, 85 %).
 
 Executar:  python tools/projetos/porta_retrato_coracoes_unidos.py <projeto.pdf> <saida.rbl>
 """
@@ -17,6 +17,7 @@ from PySide6.QtCore import QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QPainterPath, QPainterPathStroker, QTransform  # noqa: E402
 
 from redblack import camadas as cm  # noqa: E402
+from redblack import materiais as mt  # noqa: E402
 from redblack import objetos as ob  # noqa: E402
 from redblack import projeto as pj  # noqa: E402
 
@@ -108,7 +109,7 @@ def _fechar(p, r):
 
 
 def camadas():
-    corte = {"modo": "linha", "velocidade_mm_min": 800.0, "potencia_max": 85.0, "potencia_min": 0.0, "passadas": 2}
+    corte = mt.corte_mdf(3)
     return [cm.alterar(cm.Camada("C03", "Linhas dos corações (gravação fraca, 1º)"), modo="linha",
                        velocidade_mm_min=3000.0, potencia_max=15.0, potencia_min=0.0, passadas=1),
             cm.alterar(cm.Camada("C02", "MDF 3: vãos entre corações (2º)"), **corte),
@@ -150,7 +151,7 @@ def gerar(pdf, saida):
     pj.save(saida, snaps, camadas(),
             notas="Corações do porta-retrato Isabella e Nathan já UNIDOS: 2 peças de MDF 3 mm (canto esquerdo com 12 e "
                   "canto direito com 6), na posição da vista frontal do PDF.\n"
-                  "C03 grava fraco (3000 mm/min, 15 %) as divisas entre os corações; C02/C01 cortam (800 mm/min, 85 %, "
+                  "C03 grava fraco (3000 mm/min, 15 %) as divisas entre os corações; C02/C01 cortam (650 mm/min, 85 %, "
                   "2 passadas).\nCole a peça da esquerda no canto de baixo da frente esquerda (ponta dos corações no "
                   "topo da base, lado esquerdo rente à borda) e a da direita no canto de baixo da frente direita.")
     return saida

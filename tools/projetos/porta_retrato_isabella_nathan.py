@@ -16,7 +16,7 @@ APROVEITAMENTO das sobras das janelas (tudo é 3 mm, então qualquer peça cabe 
   (emendas da camada de cima em 100 e 290, fora dos rasgos e longe das de baixo: 142 e meio: 205)
 - Aba 8: fundos, base lisa 284, guias, batentes, chapinhas e coroa. Aba 9: base lisa 142, camada do meio
   (205 + 221, do PDF) e o outro par de triângulos.
-Camadas (todas 3 mm, corte 800 mm/min, 85 %, 2 passadas): C07 → C03 → C02 → C01.
+Camadas (todas 3 mm, corte 650 mm/min, 85 %, 2 passadas): C07 → C03 → C02 → C01.
 
 Executar:  python tools/projetos/porta_retrato_isabella_nathan.py <arquivo.pdf> [saida.rbl]
 """
@@ -29,6 +29,7 @@ from PySide6.QtCore import QRectF  # noqa: E402
 from PySide6.QtGui import QPainterPath, QTransform  # noqa: E402
 
 from redblack import camadas as cm  # noqa: E402
+from redblack import materiais as mt  # noqa: E402
 from redblack import formas as fm  # noqa: E402
 from redblack import importar_pdf as ip  # noqa: E402
 from redblack import objetos as ob  # noqa: E402
@@ -199,7 +200,7 @@ O QUE MUDOU PARA 3 mm
   baixo (lisa) = 284 (aba 8) + 142 (aba 9). Emendas desencontradas: 100/290, 205, 142.
 - Apoios: 4 triângulos de 3 mm colados aos pares (2 na janela direita, 2 na aba 9).
 
-CORTE (todas as camadas de corte): 800 mm/min, 85 %, 2 passadas — teste antes; ordem em cada aba: rasgos das
+CORTE (todas as camadas de corte): 650 mm/min, 85 %, 2 passadas — teste antes; ordem em cada aba: rasgos das
 peças internas → peças internas → janelas/letras/rasgos → contornos.
 
 MONTAGEM (do PDF)
@@ -214,7 +215,7 @@ MONTAGEM (do PDF)
 
 
 def camadas():
-    corte = dict(modo="linha", velocidade_mm_min=800.0, potencia_max=85.0, potencia_min=0.0, passadas=2, air=True)
+    corte = mt.corte_mdf(T)
     return [cm.alterar(cm.Camada("C07", "MDF 3: rasgos das peças nas janelas (1º)"), **corte),
             cm.alterar(cm.Camada("C03", "MDF 3: peças dentro das janelas (2º)"), **corte),
             cm.alterar(cm.Camada("C02", "MDF 3: janelas, letras, furos e rasgos (3º)"), **corte),

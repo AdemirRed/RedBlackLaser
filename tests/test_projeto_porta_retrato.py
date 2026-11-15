@@ -33,8 +33,8 @@ class PortaRetratoTest(unittest.TestCase):
         res = pr.classificar([contorno, janela, coracao, furo, outro], 3)
         self.assertEqual([lid for _, lid, _ in res], ["C01", "C02", "C03", "C07", "C01"])
         self.assertEqual([d for *_, d in res], [0, 0, 2, 2, 4])  # janela é do contorno; furo é do coração
-        for c in pr.camadas():  # corte 800 mm/min, nunca acima de 85 %
-            self.assertEqual((c.velocidade_mm_min, c.potencia_max), (800, 85))
+        for c in pr.camadas():  # corte 650 mm/min, nunca acima de 85 %
+            self.assertEqual((c.velocidade_mm_min, c.potencia_max, c.passadas), (650, 85, 2))
 
     def test_camada_de_cima_da_base_sem_folga(self):
         partes = [pr.parte_base(a, b) for a, b in zip(pr.CORTES_BASE, pr.CORTES_BASE[1:])]

@@ -24,6 +24,7 @@ from PySide6.QtCore import QPointF, QRectF  # noqa: E402
 from PySide6.QtGui import QPainterPath, QTransform  # noqa: E402
 
 from redblack import camadas as cm  # noqa: E402
+from redblack import materiais as mt  # noqa: E402
 from redblack import objetos as ob  # noqa: E402
 from redblack import projeto as pj  # noqa: E402
 
@@ -205,7 +206,7 @@ ANTES DE CORTAR
 1. Encaixes SEM folga: rasgos e abas = 3,00 (espessura); furos das rodas e mancais Ø4,00 (vareta de 4 mm).
    Calibrador Q1 (aba 00, opcional): ranhuras 2,80 a 3,10 e furos Ø3,85 / 4,00 / 4,30 para conferir a chapa.
 2. Se a chapa real não tiver 3,00, use Organizar → Redimensionar slots e/ou o Kerf da camada.
-3. Corte: 800 mm/min, 85 %, 2 passadas (nunca 100 %); gravação 3000 mm/min, 15 %. Teste antes.
+3. Corte: 650 mm/min, 85 %, 2 passadas (nunca 100 %); gravação 3000 mm/min, 15 %. Teste antes.
 C03 = gravação das tábuas (1º), C02 = furos/rasgos/janelas (2º), C01 = contornos (por último).
 
 MONTAGEM (não colar tampas nem eixos)
@@ -221,7 +222,7 @@ MONTAGEM (não colar tampas nem eixos)
 
 
 def camadas():
-    corte = dict(modo="linha", velocidade_mm_min=800.0, potencia_max=85.0, potencia_min=0.0, passadas=2, air=True)
+    corte = mt.corte_mdf(T)
     return [cm.alterar(cm.Camada(GRAV, "Gravação: linhas das tábuas (1º)"), modo="linha", velocidade_mm_min=3000.0,
                        potencia_max=15.0, potencia_min=0.0, passadas=1),
             cm.alterar(cm.Camada(FURO, "Internos: furos, rasgos e janelas (corte, 2º)"), **corte),

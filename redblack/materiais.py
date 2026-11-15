@@ -73,8 +73,18 @@ REFERENCIA_S30_PRO_MAX_20W = (
 # Predefinições da RedBlack (aparecem no topo, valem em qualquer PC; um material seu com o mesmo nome,
 # espessura e operação substitui a predefinição).
 PREDEFINIDOS_REDBLACK = (
-    Material("MDF", 3, "corte", 300, 80, 2, True, nota="Predefinição RedBlack: 80 %, 2 passadas.", origem="meu"),
+    Material("MDF", 3, "corte", 650, 85, 2, True, nota="Predefinição RedBlack: 650 mm/min, 85 %, 2 passadas.",
+             origem="meu"),
+    Material("MDF", 6, "corte", 600, 85, 5, True, nota="Predefinição RedBlack: 600 mm/min, 85 %, 5 passadas.",
+             origem="meu"),
 )
+
+
+def corte_mdf(espessura_mm: float) -> dict:
+    """Campos de camada (cm.alterar) do corte de MDF da RedBlack nessa espessura; geradores de projeto usam isto."""
+    m = next(m for m in PREDEFINIDOS_REDBLACK
+             if (m.nome, m.espessura_mm, m.operacao) == ("MDF", espessura_mm, "corte"))
+    return m.campos_camada("linha")
 
 
 def erros(m: Material) -> list:
