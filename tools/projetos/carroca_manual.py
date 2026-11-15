@@ -198,11 +198,10 @@ def montagem(pg):
         ("Mancais", "E1 e E2 (menores, furo mais alto) atrás; E3 e E4 (maiores) na frente. As abas entram nos rasgos "
          "azuis e o corte do meio do mancal se cruza com o corte de baixo do berço (meio-encaixe), como na figura. "
          "Confira que os 2 furos de cada eixo ficam alinhados (passe a vareta) e cole."),
-        ("Colunas e diagonais", "Cole R1 a R4 em pé por FORA das laterais, 2 de cada lado, mais para o centro "
-         "(cerca de 44 mm e 125 mm da traseira). As diagonais D1 a D4 vão entre elas, também por fora, como na vista "
-         "lateral."),
-        ("Guias", "Cole G1 a G8 por DENTRO das laterais, nas posições da página anterior, com o vão de 3,4 mm "
-         "(teste com a tampa)."),
+        ("Colunas e diagonais", "POR FORA de cada lateral: R em pé de 41,5 a 48,5 e de 121,5 a 128,5 mm da "
+         "traseira; D inclinadas entre elas, topo para a frente. Use o gabarito 1:1 da página 4."),
+        ("Guias", "POR DENTRO de cada lateral, rentes à borda de baixo: pares em 3-8 / 11,4-16,4 (trás) e "
+         "131-136 / 139,4-144,4 mm (frente). Cole com a tampa entre o par como espaçador. Gabarito na página 4."),
         ("Tampas", "T1 TRÁS e T2 FRENTE descem de cima para baixo entre as guias. NÃO cole: elas saem para abrir."),
         ("Banco", "A2 e A3 em pé nos rasgos roxos; cole o banco A1 por cima. A frente (T2) fica ATRÁS do banco."),
         ("Lança", "Cole V1 por baixo da frente do assoalho, com o garfo (Y) para dentro e a ponta com furo para "
@@ -224,16 +223,11 @@ def montagem(pg):
     tf_l = QTransform.fromScale(s, s) * QTransform.fromTranslate(ox, y + 4)
     desenhar_peca(pg, cc.lateral(), tf_l)
     nota(pg, ox + 2, y + 5, "L1 / L2 (lateral)", AZUL, 7.5, 40)
-    for cx in (44, 125):  # colunas
-        r = QPainterPath()
-        r.addRect(QRectF(cx - 3.5, 2, 7, 53))
-        pg.forma(r, tf_l, cor=TINTA, fundo="#d9b98a", larg=0.25)
-    for xb, xt in ((73, 89), (100, 116)):  # diagonais
-        dpath = QPainterPath(QPointF(xb, 54))
-        dpath.lineTo(xt, 10)
-        pg.forma(dpath, tf_l, cor="#8d6e63", larg=5.5 * s * 0.9)
-    nota(pg, ox + 44 * s - 3, y + 1, "R", AZUL, 7, 6)
-    nota(pg, ox + 125 * s - 3, y + 1, "R", AZUL, 7, 6)
+    for cx in COLUNAS:
+        pg.forma(_ret(cx - 3.5, 2, 7, 53), tf_l, cor=TINTA, fundo="#d9b98a", larg=0.25)
+        nota(pg, ox + cx * s - 3, y + 1, "R", AZUL, 7, 6)
+    for pe, topo in DIAGONAIS:
+        pg.forma(_diagonal(pe, topo)[0], tf_l, cor=TINTA, fundo="#8d6e63", larg=0.2)
     nota(pg, ox + 92 * s, y + 1, "D  D", AZUL, 7, 12)
     tf_base = QTransform.fromScale(s, s) * QTransform.fromTranslate(ox, piso)
     q = QPainterPath()
@@ -257,9 +251,116 @@ def montagem(pg):
          W - 2 * M)
 
 
+# posições na lateral (mm), x a partir da ponta de TRÁS, y a partir da borda de CIMA (como na vista do PDF p. 1)
+COLUNAS = (45.0, 125.0)                      # centro das colunas R (7 × 53), de y 2 a 55
+DIAGONAIS = (((73.0, 51.5), (89.7, 6.5)),    # (pé, topo) da linha do meio das diagonais D (5,5 × 48)
+             ((100.0, 51.5), (116.7, 6.5)))
+GUIAS = ((3, 8), (11.4, 16.4), (131, 136), (139.4, 144.4))  # x das guias G (5 × 52), do piso para cima
+TAMPAS = ((8, 11.4, "T1"), (136, 139.4, "T2"))
+
+
+def _ret(x, y, w, h):
+    q = QPainterPath()
+    q.addRect(QRectF(x, y, w, h))
+    return q
+
+
+def _diagonal(pe, topo):
+    (x0, y0), (x1, y1) = pe, topo
+    ang = math.degrees(math.atan2(y1 - y0, x1 - x0))
+    tf = QTransform().rotate(ang) * QTransform.fromTranslate((x0 + x1) / 2, (y0 + y1) / 2)
+    return tf.map(_ret(-24, -2.75, 48, 5.5)), ang
+
+
+def _cota_x(pg, ox, y, x, txt, cor=AZUL, acima=True, nivel=0):
+    """Tracinho na posição x da lateral (1:1) com o número em cima ou embaixo; nivel 1 = uma linha mais longe."""
+    h = 3 + 3.6 * nivel
+    pg.forma(_ret(x, 0, 0, h), QTransform.fromTranslate(ox, y - h if acima else y), cor=cor, larg=0.2)
+    pg.texto(ox + x - 6, y - h - 3.6 if acima else y + h + 0.2, 12, txt, 6.5, True, cor, Qt.AlignHCenter)
+
+
+def laterais(pg):
+    y = M
+    y += pg.texto(M, y, W - 2 * M, "4. Laterais em TAMANHO REAL (gabarito)", 15, True) + 1
+    y += pg.texto(M, y, W - 2 * M,
+                  "Imprima esta página em 100 % (sem \"ajustar à página\") e confira a régua de 50 mm. Deite a lateral "
+                  "sobre o desenho, com as bordas em cima das linhas, e cole cada peça sobre a sua mancha. Marque a "
+                  "lápis a ponta de TRÁS de L1 e L2 antes: as duas laterais usam as mesmas medidas a partir da "
+                  "traseira (x = 0, o lado das rodas grandes e da tampa T1).", 9) + 3
+    regua = QPainterPath()
+    regua.moveTo(0, 0)
+    regua.lineTo(50, 0)
+    for k in range(0, 51, 10):
+        regua.moveTo(k, 0)
+        regua.lineTo(k, -2 if k % 50 else -3)
+    pg.forma(regua, QTransform.fromTranslate(M, y + 3), larg=0.25)
+    pg.texto(M + 52, y, 60, "50 mm (confira com a régua)", 7.5, cor=CINZA)
+    y += 10
+    ox = (W - 170) / 2
+
+    # --- vista de FORA: colunas e diagonais
+    y += pg.texto(M, y, W - 2 * M, "Lado de FORA (face com as linhas de tábua): colunas R e diagonais D", 11, True)
+    y += 12
+    for cx in COLUNAS:
+        _cota_x(pg, ox, y, cx - 3.5, f"{cx - 3.5:g}".replace(".", ","))
+        _cota_x(pg, ox, y, cx + 3.5, f"{cx + 3.5:g}".replace(".", ","))
+    for pe, topo in DIAGONAIS:
+        _cota_x(pg, ox, y, topo[0], f"{topo[0]:g}".replace(".", ","), VERM, nivel=1)
+    tf = QTransform.fromTranslate(ox, y)
+    desenhar_peca(pg, cc.lateral(), tf)
+    for i, cx in enumerate(COLUNAS):
+        pg.forma(_ret(cx - 3.5, 2, 7, 53), tf, cor=TINTA, fundo="#d9b98a", larg=0.25)
+        pg.texto(ox + cx - 3.5, y + 26, 7, "R", 8, True, AZUL, Qt.AlignHCenter)
+    for pe, topo in DIAGONAIS:
+        path, _ = _diagonal(pe, topo)
+        pg.forma(path, tf, cor=VERM, fundo="#f2b8b5", larg=0.25)
+        pg.texto(ox + (pe[0] + topo[0]) / 2 - 3, y + 26, 6, "D", 8, True, VERM, Qt.AlignHCenter)
+    for pe, topo in DIAGONAIS:
+        _cota_x(pg, ox, y + cc.H_LAT + 3, pe[0], f"{pe[0]:g}".replace(".", ","), VERM, acima=False)
+    nota(pg, ox - 13, y + 24, "TRÁS\nx = 0", TINTA, 7, 12)
+    nota(pg, ox + 171, y + 24, "FRENTE", TINTA, 7, 14)
+    y += cc.H_LAT + 12
+    y += pg.texto(M, y, W - 2 * M,
+                  "Colunas R1–R4 (7 × 53): em pé, de 41,5 a 48,5 mm e de 121,5 a 128,5 mm da traseira, 2 mm abaixo "
+                  "da borda de cima (sobra ~2 mm embaixo). Diagonais D1–D4 (5,5 × 48): o pé fica 5,4 mm acima da "
+                  "borda de baixo, com o meio a 73 e 100 mm; o topo fica 6,5 mm abaixo da borda de cima, com o meio "
+                  "a 89,7 e 116,7 mm (inclinadas ~70°, o topo para a FRENTE). Na outra lateral, as mesmas medidas a "
+                  "partir da traseira (o desenho fica espelhado).", 8.5) + 6
+
+    # --- vista de DENTRO: guias (espelhada: virando a peça, a traseira vai para a direita)
+    y += pg.texto(M, y, W - 2 * M, "Lado de DENTRO (face lisa): guias G e trilho das tampas", 11, True)
+    y += 16
+    espelho = QTransform(-1, 0, 0, 1, 170, 0)
+    tf = espelho * QTransform.fromTranslate(ox, y)
+    for a, b in GUIAS:  # bordas que encostam na tampa numa segunda linha, para os números não se encavalarem
+        _cota_x(pg, ox, y, 170 - a, f"{a:g}".replace(".", ","), nivel=a in (11.4, 139.4))
+        _cota_x(pg, ox, y, 170 - b, f"{b:g}".replace(".", ","), nivel=2 * (b in (8, 136)))
+    pg.forma(caminho(cc.lateral(), {cc.CONT}), tf, fundo=MADEIRA)
+    piso = cc.H_LAT - 52
+    for a, b in GUIAS:
+        pg.forma(_ret(a, piso, b - a, 52), tf, cor=TINTA, fundo="#bbdefb", larg=0.25)
+    for a, b, cod in TAMPAS:
+        pg.forma(_ret(a, piso, b - a, 52), tf, cor=VERM, larg=0.2, tracejado=True)
+        pg.texto(ox + 170 - b - 3, y + 26, b - a + 6, cod, 7, True, VERM, Qt.AlignHCenter)
+    for a, b in ((3, 16.4), (131, 144.4)):
+        pg.texto(ox + 170 - b, y + cc.H_LAT + 3.5, b - a, "G G", 7, True, AZUL, Qt.AlignHCenter)
+    nota(pg, ox - 15, y + 24, "FRENTE", TINTA, 7, 14)
+    nota(pg, ox + 171, y + 24, "TRÁS\nx = 0", TINTA, 7, 12)
+    y += cc.H_LAT + 12
+    y += pg.texto(M, y, W - 2 * M,
+                  f"Guias G1–G8 (5 × 52), em pé, rentes à borda de baixo da lateral (o topo fica {str(round(piso, 1)).replace('.', ',')} mm abaixo da borda de "
+                  "cima). Atrás: de 3 a 8 e de 11,4 a 16,4 mm da traseira; na frente: de 131 a 136 e de 139,4 a "
+                  "144,4 mm. Entre cada par sobra o vão de 3,4 mm (tracejado vermelho) onde a tampa desce. Cole uma "
+                  "guia, encoste a tampa nela, encoste a segunda guia na tampa e cole: assim o vão fica certo mesmo "
+                  "se o MDF não tiver 3,00. Tire a tampa antes da cola secar.", 8.5) + 4
+    pg.texto(M, y, W - 2 * M,
+             "Ordem: cole as guias ANTES de encaixar as laterais no assoalho (a peça deitada fica mais fácil); as "
+             "colunas e diagonais podem ser coladas antes ou depois, sempre por fora.", 8.5, cor=VERM)
+
+
 def corte(pg):
     y = M
-    y += pg.texto(M, y, W - 2 * M, "3. Vista de frente (corte no eixo de trás)", 15, True) + 1
+    y += pg.texto(M, y, W - 2 * M, "5. Vista de frente (corte no eixo de trás)", 15, True) + 1
     y += pg.texto(M, y, W - 2 * M, "Assim ficam laterais, assoalho, berço, mancais, eixo e rodas olhando de frente. "
                   "Coordenadas da figura: u = largura (0 no meio), v = altura (para baixo; assoalho entre v 30 e 33).",
                   9.5) + 4
@@ -324,7 +425,7 @@ def gerar(rbl, saida):
     p = QPainter(pdf)
     p.setRenderHint(QPainter.Antialiasing)
     pg = Pagina(pdf, p)
-    for i, f in enumerate((capa, assoalho, montagem, corte)):
+    for i, f in enumerate((capa, assoalho, montagem, laterais, corte)):
         if i:
             pg.nova()
         f(pg, rbl) if f is capa else f(pg)
