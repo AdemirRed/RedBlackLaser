@@ -1,3 +1,3 @@
-__version__ = "0.51.0"
+__version__ = "0.52.0"
 DIREITOS = "© 2026 RedBlack. Todos os direitos reservados."
 CREDITOS = "Desenvolvido pela RedBlack com o assistente de IA Claude Opus (Anthropic)."

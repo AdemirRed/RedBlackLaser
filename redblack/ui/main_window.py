@@ -934,6 +934,8 @@ class MainWindow(QMainWindow):
             for k in ("angulo_graus", "angulo_inc_graus", "sobrevarredura_mm"):
                 f[k].setValue(getattr(c, k))
                 f[k].setEnabled(c.modo != "linha")
+            f["varrer_y"].setChecked(abs(c.angulo_graus % 180 - 90) < 0.5)
+            f["varrer_y"].setEnabled(c.modo != "linha")
             for k in ("bidirecional", "hachura_cruzada", "preencher_juntas"):
                 f[k].setChecked(getattr(c, k))
                 f[k].setEnabled(c.modo != "linha")
@@ -1046,6 +1048,8 @@ class MainWindow(QMainWindow):
             value = w.isChecked()
         elif field == "modo_imagem":
             value = w.currentData()
+        elif field == "varrer_y":
+            field, value = "angulo_graus", 90.0 if w.isChecked() else 0.0
         else:
             value = w.value()
         self.set_layer_field(lid, field, value)
@@ -4672,6 +4676,11 @@ class MainWindow(QMainWindow):
             sb.editingFinished.connect(lambda k=key: self._on_layer_form(k))
             form.addRow(label, sb)
             f[key] = sb
+        f["varrer_y"] = QCheckBox("↕ Varrer no eixo Y (linhas verticais)")
+        f["varrer_y"].setToolTip("Gravação (preenchimento/imagem) indo e voltando no eixo Y em vez do X: "
+                                 "mesmo que Ângulo de varredura = 90°")
+        f["varrer_y"].toggled.connect(lambda _=False: self._on_layer_form("varrer_y"))
+        form.insertRow(form.getWidgetPosition(f["angulo_graus"])[0], "", f["varrer_y"])
         f["kerf_mm"].setToolTip("Compensação automática (só no modo Linha): meça a largura que o feixe remove "
                                 "(ex.: corte um quadrado de 20 mm; k = 20 − medida) e digite aqui. Peças crescem "
                                 "k/2 e furos diminuem k/2 no G-code; o desenho não muda. 0 = sem compensação.")
@@ -5153,11 +5162,32 @@ class MainWindow(QMainWindow):
         self.btn_motores.setToolTip("Solta os motores quando a máquina para ($1=25), para empurrar o cabeçote com a "
                                     "mão. Desmarque para travar de novo ($1=255)")
         self.btn_motores.toggled.connect(self._motores)
+        self.btn_laser = QPushButton("🔥 Laser ligado")
+        self.btn_laser.setCheckable(True)
+        self.btn_laser.setToolTip("Acende o laser na potência ao lado (até 100 %) e deixa aceso até desligar. Com ele "
+                                  "aceso, as setas do teclado movem o cabeçote (toque = 10 mm; Alt 0,1 · Ctrl 1 · "
+                                  "Shift 50; segurar = anda até soltar) e o laser vai riscando. QUEIMA: use óculos")
+        self.btn_laser.setStyleSheet("QPushButton:checked{background:#7a1d22;border-color:#e0313b;font-weight:bold}")
+        self.btn_laser.toggled.connect(self._laser_ligado)
+        self.btn_laser.installEventFilter(self)  # setas com o botão focado também movem
+        self.pot_laser = QDoubleSpinBox()
+        self.pot_laser.setRange(0.5, 100.0)
+        self.pot_laser.setDecimals(1)
+        self.pot_laser.setValue(self.settings.value("pot_laser_ligado", 100.0, type=float))
+        self.pot_laser.setSuffix(" %")
+        self.pot_laser.setAccessibleName("Potência do laser ligado")
+        self.pot_laser.setToolTip("Potência do botão Laser ligado (vale na próxima vez que ligar)")
+        self.pot_laser.valueChanged.connect(lambda x: self.settings.setValue("pot_laser_ligado", x))
         for k, b in enumerate((self.btn_home, self.btn_enquadrar, self.btn_origem, self.btn_zerar_origem,
                                self.btn_desbloquear, self.btn_mira, self.btn_motores, self.btn_retomar,
                                self.btn_faixa, self.btn_iniciar, self.btn_pausar, self.btn_parar)):
             btns.addWidget(b, k // 3, k % 3)
         v.addLayout(btns)
+        linha_laser = QHBoxLayout()
+        linha_laser.addWidget(self.btn_laser, 1)
+        linha_laser.addWidget(QLabel("Potência"))
+        linha_laser.addWidget(self.pot_laser)
+        v.addLayout(linha_laser)
         self.btn_ar = QPushButton(icon("air"), "Air assist")
         self.btn_ar.setCheckable(True)
         self.btn_ar.setToolTip("Liga/desliga a bomba de ar (M8/M9). No trabalho, o ar liga sozinho nas camadas com "
@@ -5195,6 +5225,11 @@ class MainWindow(QMainWindow):
         fraco.addWidget(self.chk_laser_fraco)
         fraco.addWidget(self.pot_enquadrar)
         v.addLayout(fraco)
+        self.lbl_ar = QLabel("Ar na máquina: —")
+        self.lbl_ar.setToolTip("O que a própria máquina informa do air assist (M8). Na S30, ar FRACO = M8 desligado "
+                               "(a bomba fica no modo baixo); se estiver FORTE e ainda sair pouco ar, confira o "
+                               "regulador da bomba e a mangueira")
+        v.addWidget(self.lbl_ar)
         self.inicio_trabalho = QComboBox()
         self.inicio_trabalho.addItem("Origem do trabalho (0,0 definido)", "origem")
         self.inicio_trabalho.addItem("Posição atual (canto inferior esquerdo do trabalho)", "atual")
@@ -5212,7 +5247,7 @@ class MainWindow(QMainWindow):
         for b in (self.btn_controle, *self.jog_btns.values(), self.btn_enquadrar, self.btn_origem,
                   self.btn_desbloquear, self.btn_iniciar, self.btn_pausar, self.btn_parar, self.btn_ar,
                   self.btn_zerar_origem, self.btn_home, self.btn_retomar, self.btn_faixa, self.btn_mira,
-                  self.btn_motores):
+                  self.btn_motores, self.btn_laser):
             b.setEnabled(False)  # tudo travado até conectar (e o controle até ser liberado)
         v.addWidget(QLabel("O botão Parar do aplicativo não substitui a parada de emergência física."))
         v.itemAt(v.count() - 1).widget().setWordWrap(True)
@@ -5821,7 +5856,7 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, ev):
         """Setas com um botão de mover focado: toque = 10 mm (Alt 0,1 · Ctrl 1 · Shift 50); segurar = anda até soltar."""
-        if obj in getattr(self, "jog_btns", {}).values():
+        if obj in getattr(self, "jog_btns", {}).values() or obj is getattr(self, "btn_laser", None):
             t = ev.type()
             if t in (QEvent.KeyPress, QEvent.KeyRelease) and ev.key() in self._SETAS:
                 if not ev.isAutoRepeat():
@@ -6265,12 +6300,39 @@ class MainWindow(QMainWindow):
     def _mira(self, on):
         c = self.conexao
         pot = min(self.pot_enquadrar.value(), cx.MIRA_POT_MAX)
+        if on and self.btn_laser.isChecked():  # um só M3 por vez
+            self.btn_laser.blockSignals(True)
+            self.btn_laser.setChecked(False)
+            self.btn_laser.blockSignals(False)
         if not self._comando_maquina(lambda c: c.mira(on, pot, gc.PERFIL.s_max),
                                      f"Mira {'LIGADA' if on else 'desligada'}" + (f" ({pot:g} %)" if on else "")):
             self.btn_mira.blockSignals(True)
             self.btn_mira.setChecked(False)
             self.btn_mira.blockSignals(False)
         _ = c
+
+    def ask_laser_ligado(self, pot):
+        return QMessageBox.warning(
+            self, "Laser ligado", f"O laser vai ACENDER a {pot:g} % e ficar aceso até você desligar.\n\nEle QUEIMA e "
+            "corta: confira o material embaixo e use óculos de proteção. As setas do teclado movem o cabeçote com o "
+            "laser aceso.", QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel) == QMessageBox.Yes
+
+    def _laser_ligado(self, on):
+        pot = self.pot_laser.value()
+        ok = not on or self.ask_laser_ligado(pot)
+        if on and ok and self.btn_mira.isChecked():  # um só M3 por vez
+            self.btn_mira.blockSignals(True)
+            self.btn_mira.setChecked(False)
+            self.btn_mira.blockSignals(False)
+        if not ok or not self._comando_maquina(lambda c: c.laser_ligado(on, pot, gc.PERFIL.s_max),
+                                               f"Laser LIGADO a {pot:g} %: setas movem o cabeçote." if on
+                                               else "Laser desligado."):
+            self.btn_laser.blockSignals(True)
+            self.btn_laser.setChecked(False if on else self.btn_laser.isChecked())
+            self.btn_laser.blockSignals(False)
+            return
+        if on:
+            self.btn_laser.setFocus()  # setas já funcionam
 
     def _motores(self, soltos):
         if not self._comando_maquina(lambda c: c.soltar_motores(soltos),
@@ -6348,8 +6410,12 @@ class MainWindow(QMainWindow):
         livre = ativo and c.estado == cx.CONECTADO and c.controle
         rodando = c.trabalho in (cx.TRABALHO_RODANDO, cx.TRABALHO_PAUSADO)
         for b in (*self.jog_btns.values(), self.btn_enquadrar, self.btn_origem, self.btn_desbloquear, self.btn_ar,
-                  self.btn_zerar_origem, self.btn_home, self.btn_faixa, self.btn_mira, self.btn_motores):
+                  self.btn_zerar_origem, self.btn_home, self.btn_faixa, self.btn_mira, self.btn_motores,
+                  self.btn_laser):
             b.setEnabled(livre and not rodando)
+        ar = c.ar_maquina if ativo else None
+        self.lbl_ar.setText("Ar na máquina: " + ("—" if ar is None else "FORTE (M8 ligado)" if ar
+                                                 else "fraco (M8 desligado)"))
         self.btn_iniciar.setEnabled(livre and not rodando)
         self.btn_retomar.setEnabled(livre and not rodando and self.trabalho_salvo() is not None)
         if livre and self.btn_motores.isEnabled():
@@ -6358,10 +6424,11 @@ class MainWindow(QMainWindow):
                 self.btn_motores.blockSignals(True)
                 self.btn_motores.setChecked(soltos)
                 self.btn_motores.blockSignals(False)
-        if rodando and self.btn_mira.isChecked():  # o trabalho já começa com M5: a mira apagou
-            self.btn_mira.blockSignals(True)
-            self.btn_mira.setChecked(False)
-            self.btn_mira.blockSignals(False)
+        for b in (self.btn_mira, self.btn_laser):
+            if (rodando or not livre) and b.isChecked():  # o trabalho começa com M5 / sem controle: apagou
+                b.blockSignals(True)
+                b.setChecked(False)
+                b.blockSignals(False)
         self._salvar_progresso(c)
         self.btn_pausar.setEnabled(livre and rodando)
         self.btn_pausar.setText("Retomar" if c.trabalho == cx.TRABALHO_PAUSADO else "Pausar")

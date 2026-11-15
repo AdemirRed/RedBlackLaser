@@ -283,6 +283,50 @@ class PainelControleTest(unittest.TestCase):
         self.ticks(10)
         self.assertEqual(sim.config[1], 255)
 
+    def test_laser_ligado_forte_com_setas_e_ar_da_maquina(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        self.conectar()
+        sim = self.w.conexao.tr.sim
+        self.w.ask_liberar_controle = lambda: True
+        self.w.btn_controle.setChecked(True)
+        self.ticks(5)
+        self.w.ask_laser_ligado = lambda pot: False  # recusou: nada acende
+        self.w.btn_laser.setChecked(True)
+        self.assertFalse(self.w.btn_laser.isChecked())
+        self.w.ask_laser_ligado = lambda pot: True
+        self.w.pot_laser.setValue(100.0)
+        self.w.btn_mira.setChecked(True)
+        self.ticks(10)
+        self.w.btn_laser.setChecked(True)
+        self.assertFalse(self.w.btn_mira.isChecked())  # um só M3 por vez
+        self.ticks(20)
+        self.assertEqual((sim.spindle, sim.s), ("M3", 1000.0))  # 100 % de S1000
+        QTest.keyClick(self.w.btn_laser, Qt.Key_Right)  # setas com o laser aceso
+        self.ticks(80)
+        self.assertEqual(round(sim.pos[0], 3), 10.0)
+        self.w.btn_laser.setChecked(False)
+        self.ticks(10)
+        self.assertEqual(sim.spindle, "M5")
+        self.w.btn_ar.setChecked(True)
+        self.ticks(20)
+        self.assertIn("FORTE", self.w.lbl_ar.text())
+        self.w.btn_ar.setChecked(False)
+        self.ticks(20)
+        self.assertIn("fraco", self.w.lbl_ar.text())
+
+    def test_varrer_no_eixo_y(self):
+        self.w.create_shape(fm.rect_path(QRectF(10, 10, 20, 20)), "rect")
+        self.w.layer_table.selectRow(0)
+        f = self.w.layer_form
+        lid = self.w._current_layer_id()
+        self.w.set_layer_field(lid, "modo", "preenchimento")
+        self.w._fill_layer_form()
+        f["varrer_y"].setChecked(True)
+        self.assertEqual(self.w.layer(lid).angulo_graus, 90.0)
+        f["varrer_y"].setChecked(False)
+        self.assertEqual(self.w.layer(lid).angulo_graus, 0.0)
+
     def test_enviar_teste_de_precisao_para_a_maquina(self):
         self.conectar()
         self.w.ask_liberar_controle = lambda: True

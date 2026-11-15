@@ -56,6 +56,7 @@ class Conexao:
         self.controle = False          # liberado pelo usuário (mover/enviar); parar é sempre permitido
         self.wco = (0.0, 0.0, 0.0)     # deslocamento da origem do trabalho (GRBL manda de tempos em tempos)
         self._desbloquear_apos_parar = False
+        self.ar_maquina = None          # air assist (M8) segundo a própria máquina; None = ainda não informou
         self.ultimo_erro_comando = ""   # ex.: "error:9" num jog recusado (alarme)
         self._job, self._job_i, self._job_pend = [], 0, deque()
         self.trabalho, self.trabalho_ok = TRABALHO_PARADO, 0
@@ -159,6 +160,16 @@ class Conexao:
             self._linha_controle("M5")
             return
         pot = max(0.1, min(float(potencia_pct), MIRA_POT_MAX))
+        self._linha_controle(f"M3 S{round(s_max * pot / 100)}")
+        self._linha_controle("G1 F1000")
+
+    def laser_ligado(self, ligado, potencia_pct=100.0, s_max=1000):
+        """Laser ACESO na potência escolhida (até 100 %), parado ou andando com o jog ($J herda o M3 S…).
+        Mesmo truque da mira: M3 S… + "G1 F…" sem eixos. Desliga com M5. A interface pede confirmação."""
+        if not ligado:
+            self._linha_controle("M5")
+            return
+        pot = max(0.1, min(float(potencia_pct), 100.0))
         self._linha_controle(f"M3 S{round(s_max * pot / 100)}")
         self._linha_controle("G1 F1000")
 
@@ -385,6 +396,8 @@ class Conexao:
         st = grbl.status(linha)
         if st:
             self.status = st
+            if "A" in st.campos or "Ov" in st.campos:  # o GRBL só manda "A:" junto do "Ov:", e só se algo ligou
+                self.ar_maquina = "F" in st.campos.get("A", "")
             if self._desbloquear_apos_parar and self.estado == CONECTADO:
                 if st.em_alarme and self.controle and not self._fila and self._atual is None:
                     self._desbloquear_apos_parar = False

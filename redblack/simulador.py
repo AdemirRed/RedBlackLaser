@@ -85,6 +85,7 @@ class SimuladorGrbl:
         self.feed = None
         self.s = 0.0
         self.spindle = "M5"
+        self.ar, self._ar_mudou = False, False  # M8 (air assist); o reset desliga
         self.hold = False
         self.check = False
         self.homing_restante = None
@@ -234,7 +235,7 @@ class SimuladorGrbl:
                 elif m in (2, 30) and not jog:
                     vals["fim"] = True
                 elif m in (8, 9) and not jog:
-                    pass
+                    vals["ar"] = m == 8
                 else:
                     return "error:20"
             elif letra in "XYZFS":
@@ -259,7 +260,11 @@ class SimuladorGrbl:
             self.s = max(0.0, min(vals["S"], float(self.config[30])))
         if "spindle" in vals:
             self.spindle = vals["spindle"]
+        if "ar" in vals:
+            self._ar_mudou = self._ar_mudou or self.ar != vals["ar"]
+            self.ar = vals["ar"]
         if vals.get("fim"):
+            self.ar = False
             self.spindle, self.absoluto, self.mm = "M5", True, True
         if motion is not None:
             self.motion_modal = motion
@@ -382,7 +387,12 @@ class SimuladorGrbl:
         return (f"<{self.estado}|MPos:{self.pos[0]:.3f},{self.pos[1]:.3f},0.000|"
                 f"FS:{feed:g},{self.s if self.spindle != 'M5' else 0:g}|"
                 f"Bf:{PLANNER_BLOCOS - len(self.planner)},{RX_BYTES - len(self.rx)}"
+                + ("|Ov:100,100,100|A:F" if self.ar else "|Ov:100,100,100" if self._ar_avisar() else "")
                 + (f"|WCO:{wx:.3f},{wy:.3f},0.000" if (wx, wy) != (0.0, 0.0) or self._wco_avisar() else "") + ">")
+
+    def _ar_avisar(self):  # como o GRBL: "Ov:" sem "A:" no relatório seguinte = acessórios desligados
+        mudou, self._ar_mudou = getattr(self, "_ar_mudou", False), False
+        return mudou
 
     def _wco_avisar(self):
         mudou, self._wco_mudou = getattr(self, "_wco_mudou", False), False

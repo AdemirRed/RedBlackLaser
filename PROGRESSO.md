@@ -711,3 +711,12 @@ laser desligado.
 - Etapa 3 — objetos (aprovada em 2026-11-07).
 - Etapa 2 — área gráfica (aprovada em 2026-11-07).
 - Etapa 1 — interface (aprovada em 2026-11-07).
+
+## 0.52.0 — laser ligado forte, varredura em Y, ar confirmado pela máquina
+- Painel Máquina: botão "🔥 Laser ligado" com potência até 100 % (pede confirmação; M3 S… + G1 F sem eixos).
+  Com ele aceso, as setas do teclado movem o cabeçote ($J herda o M3) e o laser risca. Mira e laser: um só por vez;
+  apagam ao iniciar trabalho ou travar o controle.
+- "Ar na máquina: FORTE/fraco": lê o campo A: (F = M8 ativo) do relatório de status do GRBL. Na S30 o ar fraco é a
+  bomba no modo baixo (relé do M8 desligado); se aparecer FORTE e sair pouco ar, é o regulador da bomba/mangueira.
+  Simulador agora guarda o M8 e informa Ov:/A:F.
+- Camada: caixa "↕ Varrer no eixo Y (linhas verticais)" = ângulo de varredura 90° (preenchimento e imagem).
