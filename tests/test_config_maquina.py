@@ -39,6 +39,17 @@ class ConfigMaquinaTest(unittest.TestCase):
         gc.definir_perfil()
         self.tmp.cleanup()
 
+    def test_gravacao_em_m4_vira_padrao_uma_vez(self):
+        import json
+        self.settings.setValue("maquina", json.dumps({**MESA, "comando": "M3"}))  # salvo por versão antiga
+        w = MainWindow(self.settings)
+        self.assertEqual(gc.PERFIL.comando, "M4")
+        w.definir_maquina({**MESA, "comando": "M3"})  # depois disso, vale o que o usuário escolher
+        w.close()
+        w = MainWindow(self.settings)
+        self.assertEqual(gc.PERFIL.comando, "M3")
+        w.close()
+
     def test_origem_e_perfil_no_gcode(self):
         g.definir_mesa(300, 200, "sup_dir")
         gc.definir_perfil("M4", 255, 6000)

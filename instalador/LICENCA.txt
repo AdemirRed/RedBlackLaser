@@ -1,4 +1,4 @@
-﻿RedBlack Laser 0.52.1
+﻿RedBlack Laser 0.52.2
 © 2026 RedBlack. Todos os direitos reservados.
 Desenvolvido pela RedBlack com o assistente de IA Claude Opus (Anthropic).
 

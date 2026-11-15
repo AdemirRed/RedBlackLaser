@@ -95,6 +95,16 @@ M2 ; fim do programa
         self.assertEqual(sum("S1000 F300" in ln for ln in g1), 1)
         self.assertEqual(len(g1), 12)                        # 4 lados × (2 passadas + 1)
 
+    def test_linha_fraca_grava_em_m4_e_corte_em_m3(self):
+        """Linha de gravação (fraca) em M3 queima mais onde o cabeçote freia: só o corte de verdade vai em M3."""
+        snaps = [rect(0, 0, 10, 10, "C03"), rect(50, 50, 10, 10, "C01")]
+        lay = [layer("C03", potencia_max=15, velocidade_mm_min=3000), layer("C01", potencia_max=85)]
+        linhas = gerar(snaps, lay, gc.PerfilGrbl(comando="M4", corte_m3=True)).splitlines()
+        modo = [ln.split()[0] for ln in linhas if ln.startswith(("M3 S0", "M4 S0"))]
+        self.assertEqual(modo, ["M4", "M3"])  # armado em M4; C03 continua M4; C01 (85 %) troca para M3
+        i_c01 = next(i for i, ln in enumerate(linhas) if ln.startswith("; Camada C01"))
+        self.assertTrue(all(not ln.startswith("M3") for ln in linhas[:i_c01]))
+
     def test_conferencia_relendo_o_gcode(self):
         """O verificador relê o texto: comprimento com laser = percurso; tudo dentro da área; termina apagado."""
         snaps = [rect(10, 20, 100, 50),

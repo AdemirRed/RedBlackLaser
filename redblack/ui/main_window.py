@@ -1062,12 +1062,17 @@ class MainWindow(QMainWindow):
         self.set_layer_field(lid, field, item.checkState() == Qt.Checked)
 
     # ---------- máquina (mesa, origem, perfil do G-code) ----------
-    MAQUINA_PADRAO = {"largura": 365.0, "altura": 370.0, "origem": "inf_esq", "comando": "M3", "s_max": 1000,
+    MAQUINA_PADRAO = {"largura": 365.0, "altura": 370.0, "origem": "inf_esq", "comando": "M4", "s_max": 1000,
                       "f_max": 20000.0, "corte_m3": True}
 
     def _carregar_maquina(self):
         try:
             v = {**self.MAQUINA_PADRAO, **json.loads(self.settings.value("maquina", "") or "{}")}
+            if not self.settings.value("laser_m4_padrao", False, type=bool):  # 0.52.2: gravação em M4 vira o padrão
+                self.settings.setValue("laser_m4_padrao", True)            # (uma vez; depois vale o que escolher)
+                if v["comando"] != "M4" and self.settings.value("maquina", ""):
+                    v["comando"] = "M4"
+                    self.settings.setValue("maquina", json.dumps(v))
             g.definir_mesa(v["largura"], v["altura"], v["origem"])
             gc.definir_perfil(v["comando"], int(v["s_max"]), v["f_max"], bool(v.get("corte_m3", True)))
         except (TypeError, ValueError, KeyError):  # valor salvo corrompido: volta ao padrão
@@ -1104,7 +1109,8 @@ class MainWindow(QMainWindow):
             ("origem", "Canto da origem (onde fica o 0,0 da máquina)", g.ORIGEM, list(g.CANTOS.items())),
             ("comando", "Modo do laser", p.comando, [("M3", "M3 — potência constante"),
                                                     ("M4", "M4 — potência dinâmica (acompanha a velocidade)")]),
-            ("corte_m3", "Cortes (camadas em Linha) sempre em M3 — potência constante, vara a chapa por igual",
+            ("corte_m3", f"Cortes (camadas em Linha com {gc.CORTE_POT_MIN:g} % ou mais) em M3 — potência constante, "
+                         "vara a chapa por igual; gravação fica em M4",
              p.corte_m3, None),
             ("s_max", "Potência máxima S (GRBL $30)", p.s_max, (1, 100000, 0, "")),
             ("f_max", "Velocidade máxima aceita", p.f_max_mm_min, (1, gc.F_MAX_LIMITE, 0, " mm/min"))],

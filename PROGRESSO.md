@@ -725,3 +725,8 @@ laser desligado.
 - O "ok" do GRBL agora manda a próxima linha NA HORA (readyRead da serial → `Conexao.tick(0)`), sem esperar o
   relógio de 50 ms da tela. Antes, nos trechos curtos (curvas, linhas de gravação) o buffer de 127 bytes esvaziava, a
   máquina parava a cada linha e o laser marcava pontinhos (M4) e furinhos (M3, corte).
+
+## 0.52.2 — gravação sempre em M4 (potência acompanha a velocidade)
+- Camada em Linha com menos de `gc.CORTE_POT_MIN` (50 %) é gravação de linha: sai em M4 mesmo com `corte_m3`
+  (em M3 queimava mais onde o cabeçote freia: pontinhos nos cantos e pontas). Corte de verdade (≥ 50 %) segue M3.
+- Modo do laser padrão = M4; migração única (`laser_m4_padrao`) passa configurações salvas em M3 para M4.

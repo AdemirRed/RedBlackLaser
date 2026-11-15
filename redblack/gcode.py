@@ -44,6 +44,7 @@ class PerfilGrbl:
 
 
 PERFIL_PADRAO = PerfilGrbl()
+CORTE_POT_MIN = 50.0  # % — camada em Linha a partir daqui é CORTE (M3 com corte_m3); abaixo é gravação de linha (M4)
 _ORIGEM_TXT = {"inf_esq": "inferior esquerda", "sup_esq": "superior esquerda", "inf_dir": "inferior direita",
                "sup_dir": "superior direita"}
 PERFIL = PERFIL_PADRAO  # perfil em uso; muda por Configurações da máquina -> definir_perfil()
@@ -190,7 +191,10 @@ def gerar(percurso, camadas, perfil: PerfilGrbl | None = None, rotativo=None) ->
             camada_atual = t.camada
             # Corte com M4 perde potência onde o cabeçote desacelera (cantos, começo/fim de linha) e pode não varar
             # a chapa: com corte_m3, camadas em Linha saem em M3 (constante); gravação continua no modo do perfil.
-            cmd = "M3" if (perfil.comando == "M4" and perfil.corte_m3 and c.modo == "linha") else perfil.comando
+            # Linha fraca (< CORTE_POT_MIN, ex.: divisas e marcações gravadas) é gravação: fica em M4, senão queima mais
+            # onde o cabeçote freia (cantos e pontas viram pontinhos).
+            cmd = ("M3" if (perfil.comando == "M4" and perfil.corte_m3 and c.modo == "linha"
+                            and c.potencia_max >= CORTE_POT_MIN) else perfil.comando)
             if cmd != cmd_atual:
                 out.append(f"{cmd} S0 ; {'potencia constante (corte)' if cmd == 'M3' else 'potencia dinamica'}")
                 cmd_atual, s_atual = cmd, 0
