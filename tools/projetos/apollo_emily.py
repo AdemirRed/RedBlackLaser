@@ -87,26 +87,83 @@ FAIXAS_PDF = {"Apollo": QPointF(185.0, 303.0), "Emily": QPointF(185.0, 348.0)}  
 RECUO_GUIA = 0.4  # mm para dentro do contorno da letra: a letra colada cobre a marca
 
 
-def guias(itens):
-    """Contorno de cada nome gravado fraco NA FAIXA onde vai ser colado (centralizado), um pouco para dentro da
-    letra — gabarito para colar as letras soltas na posição certa. [(2, path, "C06")] no sistema do PDF."""
+def nomes_na_faixa(itens):
+    """{nome: [path da letra já no centro da faixa onde vai colada]} no sistema do PDF."""
     letras = [p for n, p, lid in itens if n == 1 and lid == "C03" and p.boundingRect().width() < 50
               and 140 < p.boundingRect().top() < 175]
     assert len(letras) == 11, f"esperava 11 letras (Apollo + Emily), achei {len(letras)}"
-    st = QPainterPathStroker()
-    st.setWidth(2 * RECUO_GUIA)
-    out = []
+    out = {}
     for nome, centro in FAIXAS_PDF.items():
         grupo = [p for p in letras if (p.boundingRect().center().x() < 185) == (nome == "Apollo")]
         caixa = QRectF()
         for p in grupo:
             caixa = caixa.united(p.boundingRect())
         d = centro - caixa.center()
+        out[nome] = [QTransform.fromTranslate(d.x(), d.y()).map(p) for p in grupo]
+    return out
+
+
+def _externo(p):
+    """Só os contornos de fora da letra (no gabarito vazado o miolo do "o" sai junto)."""
+    subs = []  # subcaminhos COM as curvas (polígono deixaria o furo menor que a letra nas curvas)
+    i = 0
+    while i < p.elementCount():
+        e = p.elementAt(i)
+        if e.type == QPainterPath.MoveToElement:
+            subs.append(QPainterPath(QPointF(e.x, e.y)))
+        elif e.type == QPainterPath.LineToElement:
+            subs[-1].lineTo(e.x, e.y)
+        else:  # CurveTo + 2 CurveToData
+            c2, fim = p.elementAt(i + 1), p.elementAt(i + 2)
+            subs[-1].cubicTo(e.x, e.y, c2.x, c2.y, fim.x, fim.y)
+            i += 2
+        i += 1
+    polis = [s.toFillPolygon() for s in subs]
+    out = QPainterPath()
+    for k, s in enumerate(subs):
+        if not any(j != k and o.containsPoint(polis[k][0], Qt.OddEvenFill) for j, o in enumerate(polis)):
+            s.closeSubpath()
+            out.addPath(s)
+    return out
+
+
+PLACA_SOBRA, TRILHO = 10.0, 10.0  # mm que a placa passa da faixa de cada lado; largura de cada trilho (dente)
+TOPO_FAIXA_PDF = {"Apollo": 288.0, "Emily": 333.0}
+
+
+def gabaritos(itens):
+    """Chapa 3: por nome, placa vazada com as letras (mais larga que a faixa) + 2 trilhos que colam embaixo das
+    bordas compridas e abraçam a faixa (30 mm entre eles). Devolve [(path, camada, nome)] já girado para a mesa."""
+    giro = QTransform(0, -1, 1, 0, 0, CHAPA_W)
+    nomes = nomes_na_faixa(itens)
+    out, y = [], MARGEM
+    for nome in ("Apollo", "Emily"):
+        alt = 30.0 + 2 * PLACA_SOBRA
+        placa = QPainterPath()
+        placa.addRoundedRect(QRectF(5.0, y, 360.0, alt), 5, 5)
+        mover = QTransform.fromTranslate(0, y + PLACA_SOBRA - TOPO_FAIXA_PDF[nome])
+        out += [(giro.map(_externo(mover.map(p))), "C03", f"Gabarito {nome}: letra vazada") for p in nomes[nome]]
+        out.append((giro.map(placa), "C01", f"Gabarito {nome} (placa 360 × {alt:g})"))
+        y += alt + ESPACO
+        for lado in ("de cima", "de baixo"):
+            t = QPainterPath()
+            t.addRect(QRectF(5.0, y, 360.0, TRILHO))
+            out.append((giro.map(t), "C01", f"Gabarito {nome}: trilho {lado} (cola embaixo, rente à borda da placa)"))
+            y += TRILHO + ESPACO
+    return out
+
+
+def guias(itens):
+    """Contorno de cada nome gravado fraco NA FAIXA onde vai ser colado (centralizado), um pouco para dentro da
+    letra — marca o lugar exato. [(2, path, "C06")] no sistema do PDF."""
+    st = QPainterPathStroker()
+    st.setWidth(2 * RECUO_GUIA)
+    out = []
+    for grupo in nomes_na_faixa(itens).values():
         for p in grupo:
             q = QPainterPath(p)
             q.setFillRule(Qt.OddEvenFill)
-            out.append((2, QTransform.fromTranslate(d.x(), d.y()).map(q.subtracted(st.createStroke(q)).simplified()),
-                        "C06"))
+            out.append((2, q.subtracted(st.createStroke(q)).simplified(), "C06"))
     return out
 
 
@@ -165,7 +222,7 @@ def camadas():
     for lid, nome, tipo in CAMADAS:
         c = cm.Camada(lid, nome)
         if tipo == "guia":  # só marca o lugar: linha fina e fraca (M4), some debaixo da letra
-            c = cm.alterar(c, modo="linha", velocidade_mm_min=3000.0, potencia_max=10.0, potencia_min=0.0, passadas=1)
+            c = cm.alterar(c, modo="linha", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0, passadas=1)
         elif tipo == "grav":
             c = cm.alterar(c, modo="preenchimento", velocidade_mm_min=3000.0, potencia_max=15.0, potencia_min=0.0,
                            passadas=1, intervalo_mm=0.1)
@@ -178,9 +235,10 @@ def camadas():
 def gerar(pdf, saida):
     itens = ler(pdf)
     folhas = arrumar(itens + guias(itens))
-    snaps = {n: [ob.Shape(p, nome, lid, cm.cor(lid)).snapshot() for p, lid, nome in folhas[n]] for n in (1, 2)}
+    folhas[3] = gabaritos(itens)
+    snaps = {n: [ob.Shape(p, nome, lid, cm.cor(lid)).snapshot() for p, lid, nome in folhas[n]] for n in (1, 2, 3)}
     # conferência: tudo dentro da mesa 365 × 370 com MARGEM da borda
-    for n in (1, 2):
+    for n in (1, 2, 3):
         caixa = QRectF()
         for p, _, _ in folhas[n]:
             caixa = caixa.united(p.boundingRect())
@@ -191,15 +249,19 @@ def gerar(pdf, saida):
              f"girada 90° para caber na mesa).\n"
              f"Peças a {MARGEM:g} mm da borda da chapa (não queima a borda) e {ESPACO:g} mm entre si.\n"
              f"Aproveitamento: chapa 1 {ap[1]:.0%}, chapa 2 {ap[2]:.0%}.\n"
-             "Ordem: C05 grava os corações (3000 mm/min, 15 %) → C06 grava fraco (3000 mm/min, 10 %) o contorno de "
+             "Ordem: C05 grava os corações (3000 mm/min, 15 %) → C06 grava fraco (3000 mm/min, 25 %) o contorno de "
              "Apollo na faixa de cima e de Emily na de baixo, centralizados: cole cada letra em cima do desenho dela "
              "(a marca fica 0,4 mm para dentro e some debaixo da letra) → C02 teste de encaixe 8,9/9,1/9,3/9,5/9,7 "
              "(opcional: desligue a Saída se não quiser) → C03 pés, letras e espaçadores → C04 janelas → C01 frente, "
              "fundo e faixas. Cortes 650 mm/min, 85 %, 2 passadas.\n"
+             "Chapa 3 (retalho de 360 × 165): gabarito vazado de cada nome. Cole os 2 trilhos embaixo da placa, "
+             "rentes às bordas compridas: ficam 30 mm entre eles e a placa veste a faixa no esquadro, com as pontas "
+             "alinhadas às da faixa. Fixe com fita, passe cola no fundo de cada furo e coloque as letras.\n"
              "Corte o teste primeiro, empilhe três retalhos e confira qual encaixe fica justo; se não for o 9,3, "
              "ajuste os encaixes dos 6 pés antes de cortar a chapa toda.")
-    pj.save(saida, snaps[1], camadas(), notas=notas, paginas=[None, (tuple(snaps[2]), (), ())], pagina_atual=0,
-            nomes_paginas=["Chapa 1 — frente, pés, nomes", "Chapa 2 — fundo e faixas"])
+    pj.save(saida, snaps[1], camadas(), notas=notas, paginas=[None, (tuple(snaps[2]), (), ()), (tuple(snaps[3]), (), ())],
+            pagina_atual=0, nomes_paginas=["Chapa 1 — frente, pés, nomes", "Chapa 2 — fundo e faixas",
+                                           "Chapa 3 — gabaritos das letras (retalho 360 × 165)"])
     return saida, ap
 
 
