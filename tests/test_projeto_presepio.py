@@ -29,6 +29,10 @@ class PresepioTest(unittest.TestCase):
             r = pecas[k]["cont"].boundingRect()
             self.assertAlmostEqual(r.width(), w, delta=0.2, msg=k)
             self.assertAlmostEqual(r.height(), h, delta=0.2, msg=k)
+        jose = pecas["P03"]["partes"]  # rosto desenhado (o PDF não tem) e sem o furinho de 0,7 mm na boca
+        self.assertEqual(sum(t == "cheio" for _p, t in jose), 2)
+        self.assertTrue(all(max(p.boundingRect().width(), p.boundingRect().height()) >= 1 for p, t in jose
+                            if t == "furo"))
         for p, t in pecas["T01"]["partes"]:  # textura do telhado não passa do contorno
             if t == "linha":
                 self.assertTrue(pecas["T01"]["cont"].boundingRect().contains(p.boundingRect()))

@@ -161,14 +161,50 @@ def _clip(a, b, r):
 
 
 def limpar(pecas):
-    """Tira os rasgos azuis degenerados (tamanho zero) das figuras e recorta as linhas que passam do contorno."""
+    """Tira os rasgos azuis degenerados (tamanho zero ou menores que 1 mm, como o da boca do José, que furaria o
+    rosto), recorta as linhas que passam do contorno e desenha o rosto do José (o PDF não tem)."""
     for v in pecas.values():
         cont = next(p for p, t in v["partes"] if t == "cont")
         partes = [(p, t) for p, t in v["partes"]
-                  if not (t == "furo" and min(p.boundingRect().width(), p.boundingRect().height()) < 0.1)]
+                  if not (t == "furo" and (min(p.boundingRect().width(), p.boundingRect().height()) < 0.1
+                                           or max(p.boundingRect().width(), p.boundingRect().height()) < 1.0))]
         v["partes"] = _recortar_linhas(partes, cont.boundingRect())
         v["cont"] = cont
+    if "P03" in pecas:
+        pecas["P03"]["partes"].append((rosto_jose(), "cheio"))
     return pecas
+
+
+def _traco(pontos, larg):
+    p = QPainterPath(QPointF(*pontos[0]))
+    for i in range(1, len(pontos) - 1, 2):  # curva suave passando pelos pontos (quadráticas pelos pares)
+        p.quadTo(QPointF(*pontos[i]), QPointF(*pontos[i + 1]))
+    if len(pontos) % 2 == 0:
+        p.lineTo(QPointF(*pontos[-1]))
+    st = QPainterPathStroker()
+    st.setWidth(larg)
+    st.setCapStyle(Qt.RoundCap)
+    st.setJoinStyle(Qt.RoundJoin)
+    return st.createStroke(p)
+
+
+def rosto_jose():
+    """Perfil (olhando para a esquerda), olho e sobrancelha do José, em mm do PDF (página 14): o desenho original
+    deixa o rosto em branco entre o turbante e a barba."""
+    out = QPainterPath()
+    out.setFillRule(Qt.WindingFill)
+    perfil = [(102.2, 254.5), (102.0, 255.4), (101.8, 256.3), (101.9, 256.8), (101.95, 257.0), (101.3, 258.0),
+              (101.2, 258.5), (101.7, 258.75), (102.15, 258.8), (102.2, 259.3), (102.7, 259.5), (103.2, 259.7),
+              (103.4, 259.9)]
+    out.addPath(_traco(perfil, 0.45))
+    out.addPath(_traco([(102.9, 256.25), (103.8, 255.8), (104.9, 256.1)], 0.45))  # sobrancelha
+    olho = QPainterPath()
+    olho.moveTo(103.2, 257.15)
+    olho.quadTo(103.8, 256.7, 104.4, 257.1)
+    olho.quadTo(103.8, 257.45, 103.2, 257.15)
+    out.addPath(olho)
+    out.addPath(_traco([(102.3, 257.6), (102.7, 258.3), (102.4, 258.6)], 0.3))  # asa do nariz
+    return out
 
 
 # ---------------------------------------------------------------- encaixe por grade (bitmap)
