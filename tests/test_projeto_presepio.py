@@ -46,6 +46,15 @@ class PresepioTest(unittest.TestCase):
         ordem = [c[0] for c in pr.CAMADAS]  # peça dentro de vazado corta antes do vazado
         self.assertLess(ordem.index(pr.CONT_DENTRO), ordem.index(pr.FURO))
         pj.load(saida)  # abre sem erro (nomes de aba, camadas)
+        import json
+        with open(saida, encoding="utf-8") as f:
+            d = json.load(f)
+        self.assertFalse(next(c for c in d["camadas"] if c["id"] == "C09")["saida"])  # peças sem marcação
+        self.assertFalse(any(n.startswith("SÓ LETRAS") for n in d["nomes_paginas"]))
+        import presepio_manual as pm
+        man = pm.gerar(PDF, os.path.join(tempfile.mkdtemp(), "m.pdf"))
+        with open(man, "rb") as f:
+            self.assertTrue(f.read(5).startswith(b"%PDF"))
 
 
 def _perto(a, b, d):

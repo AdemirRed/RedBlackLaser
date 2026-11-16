@@ -346,7 +346,8 @@ def gerar(pdf, saida):
              + "Aproveitamento: " + ", ".join(f"chapa {i + 1} {a:.0%}" for i, a in enumerate(ap)) + ".\n"
              f"Peças dentro dos vazados de outras (sobra que vira peça): {', '.join(dentro) or 'nenhuma'}. "
              "Elas cortam ANTES do vazado (camadas C05 e C06): o miolo solto não arrasta a peça.\n"
-             "Ordem: C09 códigos das peças → C03 figuras (preenchida 3000 mm/min, 25 %) → C04 telhado, estrela e "
+             "C09 (códigos das peças) está com a Saída DESLIGADA: as peças saem sem marcação.\n"
+             "Ordem: C03 figuras (preenchida 3000 mm/min, 25 %) → C04 telhado, estrela e "
              "folhas (traço 3000 mm/min, 25 %) → C07 números do gabarito → C05/C06 peças dentro de vazados → C02 "
              "vazados e rasgos → C01 contornos. Cortes 650 mm/min, 85 %, 2 passadas.\n"
              "Corte primeiro G01 + G02 (gabarito de folgas 2,80–3,20) e confira o encaixe antes das chapas. "
@@ -360,13 +361,17 @@ def gerar(pdf, saida):
 
 
 def _letras_25(caminho_rbl):
-    """Códigos gravados a 25 % (a 15 % não aparecem nesta máquina a 3000 mm/min)."""
+    """Códigos a 25 % (a 15 % não aparecem a 3000 mm/min), mas com a Saída DESLIGADA: o dono não quer as peças
+    prontas marcadas (o código fica só no desenho, para conferir; ligue a Saída se quiser gravar)."""
     import json
     with open(caminho_rbl, encoding="utf-8") as f:
         d = json.load(f)
     for c in d["camadas"]:
         if c["id"] == "C09":
-            c["potencia_max"] = 25.0
+            c.update(potencia_max=25.0, saida=False, nome="Códigos das peças (SAÍDA DESLIGADA: não grava)")
+    manter = [i for i, n in enumerate(d["nomes_paginas"]) if not n.startswith("SÓ LETRAS")]
+    d["paginas"] = [d["paginas"][i] for i in manter]
+    d["nomes_paginas"] = [d["nomes_paginas"][i] for i in manter]
     with open(caminho_rbl, "w", encoding="utf-8", newline="\n") as f:
         json.dump(d, f, ensure_ascii=False, indent=1)
 
