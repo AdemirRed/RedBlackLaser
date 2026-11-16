@@ -50,7 +50,7 @@ CAMADAS = [(GRAV_FIG, "Gravação das figuras (preenchida, 1º)", "grav_fig"),
            (CONT_DENTRO, "Contorno das peças DENTRO de vazados (4º, antes do vazado)", "corte"),
            (FURO, "Vazados e rasgos (5º)", "corte"),
            (CONT, "Contornos externos (por último)", "corte"),
-           (MARCA, "MARCA para pintar (só nas abas MARCA: 6000 mm/min, 80 %)", "marca")]
+           (MARCA, "MARCA para pintar (só nas abas MARCA: 8000 mm/min, 80 %)", "marca")]
 
 
 def _cor(c):
@@ -210,13 +210,14 @@ def rosto_jose():
 
 
 # ---------------------------------------------------------------- encaixe por grade (bitmap)
-def _raster(paths, caixa, buracos=()):
+def _raster(paths, caixa, buracos=(), res=None):
     """Bitmap (RES px/mm) da área cheia dos `paths` menos os `buracos`, com a caixa no canto (0, 0)."""
-    w, h = int(np.ceil(caixa.width() * RES)) + 2, int(np.ceil(caixa.height() * RES)) + 2
+    res = res or RES
+    w, h = int(np.ceil(caixa.width() * res)) + 2, int(np.ceil(caixa.height() * res)) + 2
     img = QImage(w, h, QImage.Format_Grayscale8)
     img.fill(0)
     pt = QPainter(img)
-    pt.scale(RES, RES)
+    pt.scale(res, res)
     pt.translate(-caixa.left(), -caixa.top())
     pt.setPen(Qt.NoPen)
     for brush, ps in ((Qt.white, paths), (Qt.black, buracos)):
@@ -339,7 +340,7 @@ def camadas():
             c = cm.alterar(c, modo="preenchimento", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0,
                            passadas=1, intervalo_mm=0.1)
         elif tipo == "marca":  # risco rápido, não corta: só mostra o contorno para pintar no lugar certo
-            c = cm.alterar(c, modo="linha", velocidade_mm_min=6000.0, potencia_max=80.0, potencia_min=0.0,
+            c = cm.alterar(c, modo="linha", velocidade_mm_min=8000.0, potencia_max=80.0, potencia_min=0.0,
                            passadas=1, air=False)
         elif tipo == "grav_linha":
             c = cm.alterar(c, modo="linha", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0, passadas=1)
@@ -394,10 +395,15 @@ def gerar(pdf, saida):
              "Corte primeiro G01 + G02 (gabarito de folgas 2,80–3,20) e confira o encaixe antes das chapas. "
              "Montagem: siga o guia do PDF (as peças e os códigos são os mesmos).")
     # abas MARCA: os mesmos contornos, nas mesmas posições, para marcar antes de pintar (sem mover a origem)
-    marcas = [tuple(ob.Shape(p, f"Marca {k}", MARCA, cm.cor(MARCA)).snapshot()
-                    for k, partes, _d in c for p, _l, t in partes if t == "cont") for c in chapas]
+    # + o limite de cada zona de outra cor (tronco, rosto, capa...), na mesma posição: onde trocar de tinta
+    zonas = zonas_de_cor(pecas)
+    tfs = {k: QTransform().rotate(a) * QTransform.fromTranslate(dx, dy) for k, (_c, a, dx, dy) in pos.items()}
+    marcas = [tuple([ob.Shape(p, f"Marca {k}", MARCA, cm.cor(MARCA)).snapshot()
+                     for k, partes, _d in c for p, _l, t in partes if t == "cont"]
+                    + [ob.Shape(tfs[k].map(area), f"Marca {k} {nome} ({cor.lower()})", MARCA, cm.cor(MARCA)).snapshot()
+                       for k, _p, _d in c for cor, nome, area in zonas.get(k, ())]) for c in chapas]
     nomes += [f"MARCA p/ pintar — chapa {i + 1}" for i in range(len(chapas))]
-    notas += ("\nPINTAR ANTES: rode a aba \"MARCA p/ pintar — chapa N\" (só os contornos, 6000 mm/min, 80 %), tire a "
+    notas += ("\nPINTAR ANTES: rode a aba \"MARCA p/ pintar — chapa N\" (contornos e limites entre as cores, 8000 mm/min, 80 %; veja o GUIA DE PINTURA), tire a "
               "chapa, pinte dentro das marcas, encoste a chapa de volta EXATAMENTE no mesmo lugar (no batente/esquadro "
               "da mesa, sem mexer na origem) e rode a aba \"Chapa N\" para gravar e cortar.")
     pj.save(saida, snaps[0], camadas(), notas=notas,
@@ -521,6 +527,108 @@ def previa(chapas, png):
         pt.restore()
     pt.end()
     img.save(png)
+
+
+# ---------------------------------------------------------------- cores (pintura antes do laser)
+TINTAS = {"Azul": "#2f6bd6", "Verde": "#3a9a3a", "Amarelo": "#f2c418", "Marrom": "#7a4a22", "Vermelho": "#d32f2f",
+          "Rosa": "#f48fb1", "Sem tinta": "#f3e3c3"}
+BASE_COR = {"B01": "Verde", "F01": "Marrom", "F02": "Marrom", "L01": "Marrom", "L02": "Marrom", "T01": "Vermelho",
+            "T02": "Vermelho", "P01": "Azul", "P02": "Amarelo", "P03": "Marrom", "P04": "Vermelho", "P05": "Amarelo",
+            "P06": "Rosa", "P07": "Sem tinta", "P08": "Verde", "G01": "Sem tinta", "G02": "Sem tinta"}
+# Zonas de outra cor, em coordenadas 0–10 da caixa da peça em pé (como no PDF; x para a direita, y para baixo).
+# A 1ª zona da lista vence. "só": pinta só áreas fechadas pelas linhas do desenho (a estrela da fachada).
+ZONAS = {
+    "P08": [("Amarelo", "cocos", [(3.0, 3.8), (4.6, 3.8), (4.5, 5.7), (3.0, 5.7)]),
+            ("Amarelo", "cocos", [(5.4, 3.8), (7.0, 3.8), (7.0, 5.7), (5.5, 5.7)]),
+            ("Amarelo", "cocos", [(4.6, 3.8), (5.4, 3.8), (5.4, 4.9), (4.6, 4.9)]),
+            ("Marrom", "tronco", [(4.0, 4.9), (6.0, 4.9), (6.3, 6.3), (7.6, 9.99), (2.4, 9.99), (3.7, 6.3)])],
+    "P01": [("Rosa", "rosto", [(6.0, 1.4), (7.9, 1.1), (8.1, 3.0), (6.9, 3.3), (6.2, 2.6)]),
+            ("Rosa", "mãos", [(6.7, 3.0), (8.2, 2.9), (8.0, 4.9), (6.7, 4.9)]),
+            ("Sem tinta", "vestido", [(3.8, 3.0), (6.4, 3.0), (6.7, 4.9), (6.0, 7.0), (3.5, 7.0), (3.4, 4.6)])],
+    "P02": [("Rosa", "cabeça", [(3.4, 1.1), (5.3, 1.1), (5.5, 2.4), (5.0, 3.2), (3.5, 3.2), (3.2, 2.2)]),
+            ("Rosa", "braço", [(6.5, 2.3), (7.9, 2.3), (7.9, 3.4), (6.5, 3.4)]),
+            ("Rosa", "braço", [(1.7, 2.7), (3.6, 2.7), (3.6, 3.7), (1.7, 3.7)]),
+            ("Sem tinta", "pano", [(2.8, 3.3), (6.6, 3.3), (7.4, 4.8), (6.4, 7.4), (4.6, 7.4), (3.0, 4.7)]),
+            ("Marrom", "manjedoura", [(1.4, 6.0), (8.6, 6.0), (8.8, 9.3), (1.2, 9.3)])],
+    "P03": [("Amarelo", "turbante", [(3.0, 0.0), (6.4, 0.0), (6.4, 1.0), (3.0, 1.0)]),
+            ("Rosa", "rosto", [(2.9, 0.9), (4.2, 0.9), (4.2, 1.9), (2.9, 1.9)]),
+            ("Verde", "túnica", [(3.0, 2.0), (5.3, 2.0), (5.3, 9.1), (2.9, 9.1)])],
+    "P04": [("Amarelo", "coroa", [(3.4, 0.0), (6.2, 0.0), (6.2, 2.1), (3.4, 1.2)]),
+            ("Amarelo", "baú", [(0.1, 3.0), (2.8, 3.0), (2.8, 5.3), (0.1, 5.3)]),
+            ("Rosa", "rosto", [(2.9, 1.3), (4.0, 1.1), (4.6, 2.6), (3.9, 3.9), (3.0, 3.2)])],
+    "P05": [("Vermelho", "turbante", [(3.5, 0.0), (6.2, 0.0), (6.2, 1.3), (3.5, 1.0)]),
+            ("Marrom", "rosto", [(2.9, 0.8), (4.5, 0.8), (4.5, 2.0), (2.9, 2.0)]),
+            ("Marrom", "mãos", [(0.9, 3.5), (2.5, 3.5), (2.5, 4.1), (0.9, 4.1)]),
+            ("Verde", "capa", [(4.6, 2.2), (7.0, 2.6), (8.5, 8.3), (9.6, 9.1), (5.5, 9.0), (4.8, 6.0)])],
+    "P06": [("Amarelo", "coroa", [(3.8, 0.0), (6.6, 0.0), (6.6, 1.5), (3.8, 1.0)]),
+            ("Amarelo", "vaso", [(0.0, 1.7), (3.0, 1.7), (3.0, 3.8), (0.0, 3.8)]),
+            ("Azul", "capa", [(5.2, 2.0), (6.8, 2.5), (8.0, 5.0), (9.8, 8.9), (7.0, 8.6), (5.6, 6.0), (4.6, 3.0)])],
+    "F01": [("Amarelo", "estrela", [(4.0, 0.0), (6.0, 0.0), (6.0, 2.8), (4.0, 2.8)], "só")],
+}
+RES_COR = 8.0  # px/mm no cálculo das zonas
+
+
+def zonas_de_cor(pecas):
+    """{código: [(cor, nome, área QPainterPath em mm do PDF)]}: áreas de outra cor, encostadas nas linhas do desenho
+    (a emenda entre duas cores fica debaixo da linha que o laser grava depois)."""
+    from scipy.ndimage import distance_transform_edt, label
+    from skimage.measure import approximate_polygon, find_contours
+    out = {}
+    for k, zonas in ZONAS.items():
+        v = pecas[k]
+        caixa = v["cont"].boundingRect()
+        mat = _raster([v["cont"]], caixa, [p for p, t in v["partes"] if t == "furo"], res=RES_COR)
+        st = QPainterPathStroker()
+        st.setWidth(0.35)
+        linhas = ([p for p, t in v["partes"] if t == "cheio"]
+                  + [st.createStroke(p) for p, t in v["partes"] if t == "linha"])
+        preto = _raster(linhas, caixa, res=RES_COR)[:mat.shape[0], :mat.shape[1]]
+        zona_pix = np.full(mat.shape, -1, np.int16)
+        for i in range(len(zonas) - 1, -1, -1):  # a 1ª da lista vence
+            q = QPainterPath()
+            q.addPolygon([QPointF(caixa.left() + x / 10 * caixa.width(), caixa.top() + y / 10 * caixa.height())
+                          for x, y in zonas[i][2]])
+            q.closeSubpath()
+            zona_pix[_raster([q], caixa, res=RES_COR)[:mat.shape[0], :mat.shape[1]]] = i
+        branco = mat & ~preto
+        rot, n = label(branco)
+        areas = np.bincount(rot.ravel(), minlength=n + 1)
+        cor = np.full(mat.shape, -1, np.int16)  # -1 = cor da peça
+        for i, z in enumerate(zonas):
+            so = len(z) > 3 and z[3] == "só"
+            dentro = np.bincount(rot[zona_pix == i].ravel(), minlength=n + 1)
+            area_zona = max(1, int((zona_pix == i).sum()))
+            for c in np.nonzero(dentro)[0]:
+                if c == 0:
+                    continue
+                if dentro[c] >= 0.5 * areas[c]:
+                    cor[(rot == c) & (cor == -1)] = i
+                elif not so and (dentro[c] >= 0.35 * areas[c] or areas[c] > 4 * area_zona):  # vaza: corta pela zona
+                    cor[(rot == c) & (zona_pix == i) & (cor == -1)] = i
+        _, (iy, ix) = distance_transform_edt(~branco, return_indices=True)  # linha preta: cor do branco mais perto
+        cor = np.where(branco, cor, cor[iy, ix])
+        cor[~mat] = -2
+        lista = []
+        for i, z in enumerate(zonas):
+            m = np.pad(cor == i, 1)
+            if m.sum() < 4 * RES_COR * RES_COR:  # menos de 4 mm²
+                continue
+            area = QPainterPath()
+            area.setFillRule(Qt.OddEvenFill)
+            for linha in find_contours(m.astype(float), 0.5):
+                pts = approximate_polygon(linha, 0.6)
+                pol = [QPointF(caixa.left() + (x - 1) / RES_COR, caixa.top() + (y - 1) / RES_COR) for y, x in pts]
+                if len(pol) >= 4 and abs(_area_pts(pol)) >= 1.0:
+                    area.addPolygon(pol)
+                    area.closeSubpath()
+            if not area.isEmpty():
+                lista.append((z[0], z[1], area))
+        out[k] = lista
+    return out
+
+
+def _area_pts(pts):
+    return sum(a.x() * b.y() - b.x() * a.y() for a, b in zip(pts, pts[1:] + pts[:1])) / 2
 
 
 if __name__ == "__main__":

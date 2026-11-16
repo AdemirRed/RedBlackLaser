@@ -17,17 +17,24 @@ import presepio as pr  # noqa: E402
 from carroca_manual import CINZA, M, MADEIRA, VERM, W, Pagina  # noqa: E402
 
 LARG = W - 2 * M
-TINTAS = {"Azul": "#2f6bd6", "Verde": "#3a9a3a", "Amarelo": "#f2c418", "Marrom": "#7a4a22", "Vermelho": "#d32f2f",
-          "Rosa": "#f48fb1", "Sem tinta": MADEIRA}
-COR = {"B01": "Verde", "F01": "Marrom", "F02": "Marrom", "L01": "Marrom", "L02": "Marrom", "T01": "Vermelho",
-       "T02": "Vermelho", "P01": "Azul", "P02": "Amarelo", "P03": "Verde", "P04": "Vermelho", "P05": "Amarelo",
-       "P06": "Rosa", "P07": "Sem tinta", "P08": "Verde", "G01": "Sem tinta", "G02": "Sem tinta"}
+TINTAS, COR = pr.TINTAS, pr.BASE_COR  # cor principal de cada peça; as zonas de outra cor vêm de pr.ZONAS
 POR_QUE = {"B01": "grama", "F01": "madeira da casa", "F02": "madeira da casa", "L01": "madeira da casa",
-           "L02": "madeira da casa", "T01": "telhas", "T02": "telhas", "P01": "manto de Maria",
-           "P02": "palha da manjedoura", "P03": "túnica de José", "P04": "rei Melchior", "P05": "rei Baltazar",
-           "P06": "rei Gaspar", "P07": "lã fica na cor da madeira", "P08": "folhas da palmeira",
-           "G01": "peça de teste", "G02": "peça de teste"}
-TOTAL = 4
+           "L02": "madeira da casa", "T01": "telhas", "T02": "telhas", "P01": "manto", "P02": "palha",
+           "P03": "manto", "P04": "manto", "P05": "túnica", "P06": "túnica", "P07": "a lã fica na cor da madeira",
+           "P08": "folhas", "G01": "peça de teste", "G02": "peça de teste"}
+
+
+def receita(k, zonas):
+    """Texto: cor principal + as partes de outra cor (sem repetir)."""
+    partes = []
+    for cor, nome, _a in zonas.get(k, ()):
+        t = f"{nome} {cor.lower()}"
+        if t not in partes:
+            partes.append(t)
+    return f"{COR[k].lower()} ({POR_QUE[k]})" + ("; " + ", ".join(partes) if partes else "")
+
+
+TOTAL = 5
 
 
 def _texto_contraste(cor):
@@ -35,7 +42,7 @@ def _texto_contraste(cor):
     return "#ffffff" if c.lightness() < 140 else "#222222"
 
 
-def chapa(pg, pecas_chapa, x, y, larg):
+def chapa(pg, pecas_chapa, x, y, larg, zonas, tfs):
     esc = larg / pr.MESA_W
     tf = QTransform.fromScale(esc, esc) * QTransform.fromTranslate(x, y)
     pg.forma(QPainterPath(), tf)
@@ -48,6 +55,13 @@ def chapa(pg, pecas_chapa, x, y, larg):
     for k, partes, _d in ordem:
         cont = next(p for p, _l, t in partes if t == "cont")
         pg.forma(cont, tf, cor="#111111", fundo=TINTAS[COR[k]], larg=0.25)
+        for cor, _n, area in zonas.get(k, ()):  # partes de outra cor (o risco da marcação é a borda delas)
+            pg.forma(tfs[k].map(area), tf, cor="#111111", fundo=TINTAS[cor], larg=0.12)
+        pg.p.setOpacity(0.3)  # o desenho que o laser grava depois, clarinho, só para reconhecer
+        for p, _l, t in partes:
+            if t == "cheio":
+                pg.forma(p, tf, cor="#000000", fundo="#000000", larg=0.01)
+        pg.p.setOpacity(1.0)
         for p, _l, t in partes:  # vãos grandes ficam sem tinta (caem fora)
             if t == "furo" and pr._area(p) > pr.FURO_GRANDE:
                 pg.forma(p, tf, cor="#111111", fundo="#f6efe2", larg=0.2)
@@ -102,9 +116,10 @@ def cabecalho(pg, n, titulo, sub=""):
     return 26 + (pg.texto(M, 26, LARG, sub, 9, False, CINZA) + 3 if sub else 2)
 
 
-def pagina_regras(pg, chapas):
-    y = cabecalho(pg, 1, "Pintura rápida antes do laser", "Uma cor lisa por peça. O preto (linhas do desenho, "
-                  "rostos, telhas, contornos) quem faz é o laser DEPOIS, por cima da tinta.")
+def pagina_regras(pg, chapas, zonas):
+    y = cabecalho(pg, 1, "Pintura rápida antes do laser", "Cores lisas, sem detalhe: a cor principal da peça e, "
+                  "onde precisa, outra cor (tronco, rostos, coroas, capas). O preto (linhas do desenho) quem faz é o "
+                  "laser DEPOIS, por cima da tinta.")
     pg.texto(M, y, LARG, "SUAS CORES", 10, True, VERM)
     y += 6
     larg = LARG / 7
@@ -122,15 +137,17 @@ def pagina_regras(pg, chapas):
         q = QPainterPath()
         q.addRoundedRect(QRectF(cx, cy + 0.6, 9, 5), 1, 1)
         pg.forma(q, QTransform(), cor="#222222", fundo=TINTAS[COR[k]], larg=0.2)
-        pg.texto(cx + 11, cy + 0.8, meia - 12, f"{pr.NOMES[k]}: {COR[k].lower()} ({POR_QUE[k]})", 8)
+        pg.texto(cx + 11, cy + 0.8, meia - 12, f"{pr.NOMES[k]}: {receita(k, zonas)}", 7)
     y += (len(COR) + 1) // 2 * 7 + 6
     pg.texto(M, y, LARG, "PASSO A PASSO (em cada chapa)", 10, True, VERM)
     y += 6
     for i, s in enumerate((
             "Encoste a chapa no canto da mesa (batente) e rode a aba \"MARCA p/ pintar — chapa N\": o laser risca "
-            "o contorno de cada peça em menos de 1 minuto.",
-            "Tire a chapa e pinte DENTRO de cada risco com a cor da página dessa chapa. Rolinho de espuma ou pincel "
-            "largo, 1 demão fina. Pode passar no máximo 1 mm do risco (as peças estão a 2 mm uma da outra).",
+            "o contorno de cada peça e o limite entre as cores (risco fino), em cerca de 1 minuto.",
+            "Tire a chapa e pinte DENTRO de cada risco com a cor da página dessa chapa: primeiro a cor principal "
+            "da peça, depois as partes de outra cor (têm risco em volta). Pincel largo nas grandes, fino nas "
+            "pequenas, 1 demão fina. No contorno, pode passar no máximo 1 mm (as peças estão a 2 mm uma da outra); "
+            "entre duas cores, o laser grava uma linha preta por cima depois.",
             "Não pinte o vão grande da fachada nem os triângulos e janelas das laterais e do fundo: eles caem fora "
             "(dentro deles há peças de outra cor, pinte só a peça).",
             "Deixe secar bem (toque seco não basta: espere 1 hora). Tinta mole gruda e mancha na gravação.",
@@ -149,24 +166,52 @@ def pagina_regras(pg, chapas):
              "• As bordas cortadas ficam na cor da madeira (o laser corta depois da tinta).", 8)
 
 
-def pagina_chapa(pg, n, i, chapa_pecas):
+def pagina_chapa(pg, n, i, chapa_pecas, zonas, tfs):
     y = cabecalho(pg, n, f"Chapa {i + 1}: onde pintar", "Como a chapa fica na mesa, igual à marcação do laser. "
                   "Pinte cada peça da cor escrita nela.")
-    y = chapa(pg, chapa_pecas, M, y + 2, LARG) + 6
-    cores = {}
-    for k, _p, _d in chapa_pecas:
-        cores.setdefault(COR[k], []).append(pr.NOMES[k])
-    for cor, nomes in cores.items():
+    y = chapa(pg, chapa_pecas, M, y + 2, LARG, zonas, tfs) + 5
+    for k, _p, _d in sorted(chapa_pecas):
         q = QPainterPath()
-        q.addRoundedRect(QRectF(M, y + 0.6, 9, 5), 1, 1)
-        pg.forma(q, QTransform(), cor="#222222", fundo=TINTAS[cor], larg=0.2)
-        y += pg.texto(M + 11, y + 0.8, LARG - 11, f"{cor}: " + ", ".join(nomes), 8.5) + 2.5
+        q.addRoundedRect(QRectF(M, y + 0.5, 7, 4), 1, 1)
+        pg.forma(q, QTransform(), cor="#222222", fundo=TINTAS[COR[k]], larg=0.2)
+        y += pg.texto(M + 9, y + 0.5, LARG - 9, f"{pr.NOMES[k]}: {receita(k, zonas)}", 7.5) + 1.6
+
+
+def pagina_figuras(pg, n, pecas, zonas):
+    y = cabecalho(pg, n, "Figuras de perto", "Em pé, como ficam no presépio. Cada parte colorida tem um risco em "
+                  "volta na marcação do laser.")
+    ks = ["P08", "P01", "P02", "P03", "P04", "P05", "P06", "F01"]
+    larg, alt = LARG / 4, 88.0
+    for i, k in enumerate(ks):
+        x0, y0 = M + (i % 4) * larg, y + (i // 4) * (alt + 26)
+        c = pecas[k]["cont"].boundingRect()
+        esc = min((larg - 4) / c.width(), (alt - 4) / c.height())
+        tf = (QTransform.fromTranslate(-c.left(), -c.top()) * QTransform.fromScale(esc, esc)
+              * QTransform.fromTranslate(x0 + (larg - c.width() * esc) / 2, y0 + (alt - c.height() * esc)))
+        pg.forma(pecas[k]["cont"], tf, cor="#111111", fundo=TINTAS[COR[k]], larg=0.25)
+        for p, t in pecas[k]["partes"]:
+            if t == "furo" and pr._area(p) > pr.FURO_GRANDE:
+                pg.forma(p, tf, cor="#111111", fundo="#ffffff", larg=0.2)
+        for cor, _n, area in zonas.get(k, ()):
+            pg.forma(area, tf, cor="#111111", fundo=TINTAS[cor], larg=0.12)
+        pg.p.setOpacity(0.35)
+        for p, t in pecas[k]["partes"]:
+            if t == "cheio":
+                pg.forma(p, tf, cor="#000000", fundo="#000000", larg=0.01)
+            elif t == "linha":
+                pg.forma(p, tf, cor="#000000", larg=0.1)
+        pg.p.setOpacity(1.0)
+        pg.texto(x0, y0 + alt + 1, larg, pr.NOMES[k], 8, True, "#222222", Qt.AlignHCenter)
+        pg.texto(x0 + 1, y0 + alt + 5, larg - 2, receita(k, zonas), 6.5, False, CINZA, Qt.AlignHCenter)
 
 
 def gerar(pdf_entrada, saida):
     pecas = pr.limpar(pr.ler(pdf_entrada))
-    chapas = pr.folhas(pecas, pr.encaixar(pecas))  # o mesmo encaixe do projeto (determinístico)
-    assert len(chapas) + 1 == TOTAL
+    pos = pr.encaixar(pecas)  # o mesmo encaixe do projeto (determinístico)
+    chapas = pr.folhas(pecas, pos)
+    zonas = pr.zonas_de_cor(pecas)
+    tfs = {k: QTransform().rotate(a) * QTransform.fromTranslate(dx, dy) for k, (_c, a, dx, dy) in pos.items()}
+    assert len(chapas) + 2 == TOTAL
     pdf = QPdfWriter(saida)
     pdf.setResolution(300)
     pdf.setPageLayout(QPageLayout(QPageSize(QPageSize.A4), QPageLayout.Portrait, QMarginsF(0, 0, 0, 0)))
@@ -174,10 +219,12 @@ def gerar(pdf_entrada, saida):
     p = QPainter(pdf)
     p.setRenderHint(QPainter.Antialiasing)
     pg = Pagina(pdf, p)
-    pagina_regras(pg, chapas)
+    pagina_regras(pg, chapas, zonas)
     for i, c in enumerate(chapas):
         pg.nova()
-        pagina_chapa(pg, i + 2, i, c)
+        pagina_chapa(pg, i + 2, i, c, zonas, tfs)
+    pg.nova()
+    pagina_figuras(pg, TOTAL, pecas, zonas)
     p.end()
     return saida
 

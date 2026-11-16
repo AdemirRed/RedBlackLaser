@@ -55,20 +55,27 @@ class PresepioTest(unittest.TestCase):
             d = json.load(f)
         self.assertFalse(next(c for c in d["camadas"] if c["id"] == "C09")["saida"])  # peças sem marcação
         self.assertFalse(any(n.startswith("SÓ LETRAS") for n in d["nomes_paginas"]))
-        # abas MARCA: só os contornos, nas mesmas posições da chapa de corte, camada 6000 mm/min a 80 %
+        # abas MARCA: só os contornos, nas mesmas posições da chapa de corte, camada 8000 mm/min a 80 %
         marca = next(c for c in d["camadas"] if c["id"] == pr.MARCA)
-        self.assertEqual((marca["velocidade_mm_min"], marca["potencia_max"], marca["passadas"]), (6000, 80, 1))
+        self.assertEqual((marca["velocidade_mm_min"], marca["potencia_max"], marca["passadas"]), (8000, 80, 1))
         self.assertEqual(d["nomes_paginas"][3:], [f"MARCA p/ pintar — chapa {i}" for i in (1, 2, 3)])
         for i, chapa in enumerate(chapas):
             contornos = sorted((round(p.boundingRect().x(), 3), round(p.boundingRect().y(), 3))
                                for _k, partes, _d in chapa for p, _l, t in partes if t == "cont")
             objs = d["paginas"][3 + i]["objetos"]
-            self.assertEqual(len(objs), len(contornos))
+            self.assertGreaterEqual(len(objs), len(contornos))  # contornos + limites das cores (conferidos abaixo)
             self.assertTrue(all(o["camada"] == pr.MARCA for o in objs))
         import presepio_pintura as pp  # guia de pintura: só as 6 cores que o dono tem (+ sem tinta)
         self.assertLessEqual(set(pp.COR.values()), {"Azul", "Verde", "Amarelo", "Marrom", "Vermelho", "Rosa",
                                                      "Sem tinta"})
         self.assertEqual(set(pp.COR), set(pecas))
+        zonas = pr.zonas_de_cor(pecas)  # partes de outra cor: tronco da palmeira, rostos, capas...
+        self.assertLessEqual({c for z in zonas.values() for c, _n, _a in z}, set(pr.TINTAS))
+        self.assertIn(("Marrom", "tronco"), [(c, n) for c, n, _a in zonas["P08"]])
+        self.assertIn(("Rosa", "rosto"), [(c, n) for c, n, _a in zonas["P04"]])
+        n_zonas = sum(len(z) for z in zonas.values())
+        self.assertEqual(sum(len(p["objetos"]) for p in d["paginas"][3:]),
+                         sum(len(c) for c in chapas) + n_zonas)  # marcação = contornos + limites das cores
         guia = pp.gerar(PDF, os.path.join(tempfile.mkdtemp(), "pintura.pdf"))
         with open(guia, "rb") as f:
             self.assertTrue(f.read(5).startswith(b"%PDF"))
