@@ -64,6 +64,9 @@ class OrcamentoTest(unittest.TestCase):
         self.assertAlmostEqual(r["preco"], 96.0)
         self.assertEqual(r["tinta"], 0.0)
         self.assertAlmostEqual(orc.orcar({"camadas": 3, "preco_manual": 70})["preco"], 70.0)  # preço na mão vence
+        r = orc.orcar({"camadas": 3, "laser_min": 60, "manual_min": 30})  # corte e mão de obra: o cliente paga
+        self.assertAlmostEqual(r["preco"], 24 + 20 + 50 + 7.5)
+        self.assertAlmostEqual(r["custo"], r["desembolso"])  # mas não são custo
 
     def test_tempo_das_abas_e_janela(self):
         d = tempfile.mkdtemp()

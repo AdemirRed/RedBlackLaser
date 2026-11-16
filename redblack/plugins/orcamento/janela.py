@@ -431,14 +431,15 @@ class JanelaOrcamento(QDialog):
             ("Cola", f"kit {reais(v['cola_preco'])} ÷ {int(v['cola_pecas'])} peças", r["cola"],
              st("cola_preco", "cola_pecas")),
             ("Outros insumos", "embalagem, fita, parafusos…", r["insumos"], st("insumos")),
-            ("Seu laser (não é custo)", f"{v['laser_min']:.0f} min × {reais(v['hora_maquina'])}/h — você recebe", r["remun_maquina"],
+            ("Corte a laser (cobrado)", f"{v['laser_min']:.0f} min × {reais(v['hora_maquina'])}/h — cliente paga, não é custo", r["maquina_total"],
              st("laser_min")),
-            ("Sua mão de obra (não é custo)", f"{v['manual_min']:g} min × {reais(v['hora_manual'])}/h — você recebe",
+            ("Mão de obra (cobrada)", f"{v['manual_min']:g} min × {reais(v['hora_manual'])}/h — cliente paga, não é custo",
              r["manual"], st("manual_min")),
             ("= Custo (sai do bolso)", "MDF + tinta + cola + insumos", r["custo"], ""),
             ("Placas cobradas", f"{r['placas']} placas × {reais(v['preco_placa'])}", r["cobr_placas"], ""),
             ("Pintura cobrada", self.como_pintura(v, r), r["cobr_pintura"], ""),
-            ("Preço de venda", ("preço informado" if v["preco_manual"] else "placas + pintura" if r["por_placa"]
+            ("Preço de venda", ("preço informado" if v["preco_manual"] else "placas + pintura + corte + mão de obra"
+                                if r["por_placa"]
                                 else f"custo + {v['margem_pct']:g} %")
              + (f" − {r['desconto']:g} % (quantidade)" if r["desconto"] else ""), r["preco"], ""),
             ("= Lucro estimado", f"preço − custo ({r['margem_real_pct']:.0f} % do preço): paga o seu tempo", r["lucro"], ""),
@@ -512,6 +513,10 @@ class JanelaOrcamento(QDialog):
         s = f"{r['placas']} placa(s) de MDF × {reais(v['preco_placa'])} = {reais(r['cobr_placas'])}"
         if r["pintado"]:
             s += f" + pintura {reais(r['cobr_pintura'])}"
+        if r["maquina_total"]:
+            s += f" + corte a laser {reais(r['maquina_total'])}"
+        if r["manual"]:
+            s += f" + mão de obra {reais(r['manual'])}"
         return s + " por unidade"
 
     # ================================================================== saídas

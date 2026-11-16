@@ -754,3 +754,9 @@ laser desligado.
   (A "Solda" antiga só juntava: quem queria o rasgo do encaixe recebia o dente.)
 - Barra lateral: todos os botões do mesmo tamanho (os que têm menu ficavam mais largos e desalinhados) e o campo do
   raio do bolear sem setas, na largura da barra (passava dela e alargava a barra).
+
+## 0.54.1 — orçamento: o cliente paga o corte e a mão de obra
+- Preço por placa = placas × R$ 8 + pintura + **tempo de laser × hora de máquina + trabalho manual × sua hora**.
+  Antes o tempo de corte não entrava no preço (Carine: 2 h 56 min de laser e o preço ficava em R$ 44).
+- Continuam fora do custo (custo = só o que sai do bolso); a composição no PDF e no texto do cliente mostra
+  "corte a laser" e "mão de obra".

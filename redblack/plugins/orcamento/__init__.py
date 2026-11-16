@@ -6,9 +6,9 @@ Separação usada (para não confundir valor de referência com dinheiro que sai
   • MÃO DE OBRA — tempo manual × sua hora.
   • REMUNERAÇÃO DA MÁQUINA — tempo de laser × (hora de laser cobrada − custo operacional/h).
   • CUSTO = só o desembolso (o que sai do bolso). Hora de laser e trabalho manual são do próprio dono: entram no
-    PREÇO (o que ele cobra), nunca no custo — senão um corte longo dá "prejuízo" que não existe.
+    PREÇO (o cliente paga), nunca no custo — senão um corte longo dá "prejuízo" que não existe.
   • PREÇO por placa (padrão): placas × R$ por placa + pintura (valor do projeto completo até N placas, + R$ por
-    placa acima disso). Preço informado na mão vence; preço por placa 0 = custo + margem.
+    placa acima disso) + tempo de laser × hora de máquina + trabalho manual × sua hora. Preço informado na mão vence; preço por placa 0 = custo + margem.
   • LUCRO = preço − desembolso (o que fica para você: paga o seu tempo de laser e o seu trabalho manual).
 Cada dado tem a marca "confirmado"; o resto aparece como ESTIMATIVA.
 """
@@ -97,7 +97,7 @@ def orcar(v):
     cobr_pintura = (float(v["pintura_preco"]) + float(v["pintura_extra"]) * max(0, placas - int(v["pintura_limite"]))
                     if pintado else 0.0)
     por_placa = not float(v["preco_manual"]) and float(v["preco_placa"]) > 0
-    preco = (float(v["preco_manual"]) or (cobr_placas + cobr_pintura if por_placa
+    preco = (float(v["preco_manual"]) or (cobr_placas + cobr_pintura + maquina_total + manual if por_placa
                                           else referencia * (1 + float(v["margem_pct"]) / 100)))
     lucro = preco - custo
     r = {"placa": placa, "placas": placas, "cobr_placas": cobr_placas, "cobr_pintura": cobr_pintura,
