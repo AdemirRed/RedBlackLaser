@@ -65,6 +65,13 @@ class PresepioTest(unittest.TestCase):
             objs = d["paginas"][3 + i]["objetos"]
             self.assertEqual(len(objs), len(contornos))
             self.assertTrue(all(o["camada"] == pr.MARCA for o in objs))
+        import presepio_pintura as pp  # guia de pintura: só as 6 cores que o dono tem (+ sem tinta)
+        self.assertLessEqual(set(pp.COR.values()), {"Azul", "Verde", "Amarelo", "Marrom", "Vermelho", "Rosa",
+                                                     "Sem tinta"})
+        self.assertEqual(set(pp.COR), set(pecas))
+        guia = pp.gerar(PDF, os.path.join(tempfile.mkdtemp(), "pintura.pdf"))
+        with open(guia, "rb") as f:
+            self.assertTrue(f.read(5).startswith(b"%PDF"))
         import presepio_manual as pm
         man = pm.gerar(PDF, os.path.join(tempfile.mkdtemp(), "m.pdf"))
         with open(man, "rb") as f:
