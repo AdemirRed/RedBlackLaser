@@ -42,13 +42,15 @@ NOMES = {"B01": "Base", "F01": "Fachada com estrela", "F02": "Fundo vazado", "L0
 # camada: (nome, tipo). Ordem de saída = ordem desta lista.
 CORTE_DENTRO_FURO, CONT_DENTRO, FURO, CONT = "C05", "C06", "C02", "C01"
 GRAV_FIG, GRAV_LINHA, GRAV_NUM = "C03", "C04", "C07"
+MARCA = "C08"  # contornos marcados de leve na chapa ANTES de pintar (abas "MARCA"): mostram onde pintar
 CAMADAS = [(GRAV_FIG, "Gravação das figuras (preenchida, 1º)", "grav_fig"),
            (GRAV_LINHA, "Gravação de traço: telhado, estrela, folhas (2º)", "grav_linha"),
            (GRAV_NUM, "Números do gabarito G01 (gravação)", "grav_fig"),
            (CORTE_DENTRO_FURO, "Rasgos das peças que estão DENTRO de vazados (3º)", "corte"),
            (CONT_DENTRO, "Contorno das peças DENTRO de vazados (4º, antes do vazado)", "corte"),
            (FURO, "Vazados e rasgos (5º)", "corte"),
-           (CONT, "Contornos externos (por último)", "corte")]
+           (CONT, "Contornos externos (por último)", "corte"),
+           (MARCA, "MARCA para pintar (só nas abas MARCA: 6000 mm/min, 80 %)", "marca")]
 
 
 def _cor(c):
@@ -336,6 +338,9 @@ def camadas():
         if tipo == "grav_fig":  # gravação fraca some abaixo de 25 % a 3000 mm/min nesta máquina
             c = cm.alterar(c, modo="preenchimento", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0,
                            passadas=1, intervalo_mm=0.1)
+        elif tipo == "marca":  # risco rápido, não corta: só mostra o contorno para pintar no lugar certo
+            c = cm.alterar(c, modo="linha", velocidade_mm_min=6000.0, potencia_max=80.0, potencia_min=0.0,
+                           passadas=1, air=False)
         elif tipo == "grav_linha":
             c = cm.alterar(c, modo="linha", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0, passadas=1)
         else:
@@ -388,8 +393,15 @@ def gerar(pdf, saida):
              "vazados e rasgos → C01 contornos. Cortes 650 mm/min, 85 %, 2 passadas.\n"
              "Corte primeiro G01 + G02 (gabarito de folgas 2,80–3,20) e confira o encaixe antes das chapas. "
              "Montagem: siga o guia do PDF (as peças e os códigos são os mesmos).")
+    # abas MARCA: os mesmos contornos, nas mesmas posições, para marcar antes de pintar (sem mover a origem)
+    marcas = [tuple(ob.Shape(p, f"Marca {k}", MARCA, cm.cor(MARCA)).snapshot()
+                    for k, partes, _d in c for p, _l, t in partes if t == "cont") for c in chapas]
+    nomes += [f"MARCA p/ pintar — chapa {i + 1}" for i in range(len(chapas))]
+    notas += ("\nPINTAR ANTES: rode a aba \"MARCA p/ pintar — chapa N\" (só os contornos, 6000 mm/min, 80 %), tire a "
+              "chapa, pinte dentro das marcas, encoste a chapa de volta EXATAMENTE no mesmo lugar (no batente/esquadro "
+              "da mesa, sem mexer na origem) e rode a aba \"Chapa N\" para gravar e cortar.")
     pj.save(saida, snaps[0], camadas(), notas=notas,
-            paginas=[None] + [(s, (), ()) for s in snaps[1:]], pagina_atual=0, nomes_paginas=nomes)
+            paginas=[None] + [(s, (), ()) for s in snaps[1:] + marcas], pagina_atual=0, nomes_paginas=nomes)
     import etiquetas
     etiquetas.etiquetar(saida, saida)
     _letras_25(saida)

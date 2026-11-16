@@ -55,6 +55,16 @@ class PresepioTest(unittest.TestCase):
             d = json.load(f)
         self.assertFalse(next(c for c in d["camadas"] if c["id"] == "C09")["saida"])  # peças sem marcação
         self.assertFalse(any(n.startswith("SÓ LETRAS") for n in d["nomes_paginas"]))
+        # abas MARCA: só os contornos, nas mesmas posições da chapa de corte, camada 6000 mm/min a 80 %
+        marca = next(c for c in d["camadas"] if c["id"] == pr.MARCA)
+        self.assertEqual((marca["velocidade_mm_min"], marca["potencia_max"], marca["passadas"]), (6000, 80, 1))
+        self.assertEqual(d["nomes_paginas"][3:], [f"MARCA p/ pintar — chapa {i}" for i in (1, 2, 3)])
+        for i, chapa in enumerate(chapas):
+            contornos = sorted((round(p.boundingRect().x(), 3), round(p.boundingRect().y(), 3))
+                               for _k, partes, _d in chapa for p, _l, t in partes if t == "cont")
+            objs = d["paginas"][3 + i]["objetos"]
+            self.assertEqual(len(objs), len(contornos))
+            self.assertTrue(all(o["camada"] == pr.MARCA for o in objs))
         import presepio_manual as pm
         man = pm.gerar(PDF, os.path.join(tempfile.mkdtemp(), "m.pdf"))
         with open(man, "rb") as f:
