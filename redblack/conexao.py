@@ -200,6 +200,7 @@ class Conexao:
         if self.estado == CONECTADO:
             self.tr.escrever(b"!")
             self.log.append(("→", "[pausar]"))
+            self._apagar_na_pausa = True  # 0x9E quando parar (Hold:0): em M3 a pausa sozinha deixa o laser aceso
             if self.trabalho == TRABALHO_RODANDO:
                 self.trabalho = TRABALHO_PAUSADO
 
@@ -207,6 +208,7 @@ class Conexao:
         self._exigir_controle(com_trabalho_livre=False)
         self.tr.escrever(b"~")
         self.log.append(("→", "[retomar]"))
+        self._apagar_na_pausa = False
         if self.trabalho == TRABALHO_PAUSADO:
             self.trabalho = TRABALHO_RODANDO
 
@@ -316,10 +318,14 @@ class Conexao:
                 self._esperando_fim = True  # concluído só quando a máquina voltar a Idle (ver _receber/status)
         else:
             n = self.trabalho_ok + 1
-            self.tr.escrever(b"!")  # pausa já: não continua gravando depois de um erro
+            # RESET, não pausa: em M3 (corte) o GRBL pausado (!) deixa o laser ACESO parado, queimando no mesmo
+            # ponto. O reset apaga na hora; o trabalho pode ser retomado depois ("Retomar interrompido").
+            self.tr.escrever(bytes([0x18]))
+            self.log.append(("→", "[PARAR — reset por erro]"))
+            self._desbloquear_apos_parar = self.controle
             self.trabalho = TRABALHO_ERRO
-            self._evento(f"Trabalho interrompido: {linha} na linha {n} ({self._job[n - 1][:40]}). Máquina pausada; "
-                         "use Parar.")
+            self._evento(f"Trabalho interrompido: {linha} na linha {n} ({self._job[n - 1][:40]}). Laser apagado "
+                         "(reset).")
             self._job_i = len(self._job)  # não envia mais nada
         return True
 
@@ -396,6 +402,10 @@ class Conexao:
         st = grbl.status(linha)
         if st:
             self.status = st
+            if getattr(self, "_apagar_na_pausa", False) and st.estado == "Hold:0":
+                self._apagar_na_pausa = False
+                self.tr.escrever(bytes([0x9E]))  # GRBL 1.1: apaga o laser na pausa; o "~" religa ao retomar
+                self.log.append(("→", "[apagar laser na pausa]"))
             if "A" in st.campos or "Ov" in st.campos:  # o GRBL só manda "A:" junto do "Ov:", e só se algo ligou
                 self.ar_maquina = "F" in st.campos.get("A", "")
             if self._desbloquear_apos_parar and self.estado == CONECTADO:

@@ -1,6 +1,6 @@
 ﻿; Instalador do RedBlack Laser (Inno Setup 6). Gerado por instalador\gerar.ps1.
 #ifndef Versao
-  #define Versao "0.52.2"
+  #define Versao "0.52.3"
 #endif
 
 [Setup]

@@ -730,3 +730,9 @@ laser desligado.
 - Camada em Linha com menos de `gc.CORTE_POT_MIN` (50 %) é gravação de linha: sai em M4 mesmo com `corte_m3`
   (em M3 queimava mais onde o cabeçote freia: pontinhos nos cantos e pontas). Corte de verdade (≥ 50 %) segue M3.
 - Modo do laser padrão = M4; migração única (`laser_m4_padrao`) passa configurações salvas em M3 para M4.
+
+## 0.52.3 — segurança: erro e pausa apagam o laser (M3)
+- Erro do GRBL no meio do trabalho: antes pausava ("!"), e em M3 (corte) o GRBL pausado deixa o laser ACESO parado —
+  queimou o MDF num ponto na máquina real. Agora manda reset (0x18): apaga na hora; "Retomar interrompido" continua.
+- Pausar: "!" e, quando o status chega em Hold:0, 0x9E (parada do laser na pausa do GRBL 1.1); "~" religa.
+- Simulador corrigido: em M3 a pausa não apaga o laser (como o GRBL real); aceita 0x9E.

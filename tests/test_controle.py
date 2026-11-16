@@ -60,17 +60,36 @@ class ControleTest(unittest.TestCase):
         self.assertFalse(self.sim.emitindo)  # terminou com o laser apagado
         self.assertEqual(self.c.progresso, 0.0)
 
-    def test_erro_no_meio_pausa_e_parar_apaga(self):
+    def test_erro_no_meio_apaga_o_laser_na_hora(self):
+        """Erro no meio de um CORTE em M3: pausar deixaria o laser aceso parado queimando — tem que ser reset."""
         self.c.habilitar_controle(True)
-        self.c.iniciar_trabalho("G21\nG90\nM4 S300\nG1 X20 Y0 F600\nG2 X30 Y10 I5 J5\nG1 X40 Y0\nM5\n")
-        rodar(self.c, 3.0)
+        self.c.iniciar_trabalho("G21\nG90\nM3 S850\nG1 X20 Y0 F600\nG2 X30 Y10 I5 J5\nG1 X40 Y0\nM5\n")
+        rodar(self.c, 0.3)
         self.assertEqual(self.c.trabalho, cx.TRABALHO_ERRO)  # G2 dá error:20 no simulador
         depois_do_erro = self.tr.escrito.split(b"G2 X30")[1]
-        self.assertIn(b"!", depois_do_erro)  # pausou na hora (linhas já no buffer do GRBL ficam paradas)
+        self.assertIn(bytes([0x18]), depois_do_erro)  # reset na hora
         self.assertEqual(self.c._job_i, len(self.c._job))  # e não vai mandar mais nada
-        self.c.parar()
-        rodar(self.c, 2.0)
+        queimou = self.sim.emissao_parada_s
+        rodar(self.c, 3.0)
         self.assertFalse(self.sim.emitindo)
+        self.assertEqual(self.sim.emissao_parada_s, queimou)  # nenhum segundo de laser parado depois do erro
+        self.assertEqual(self.c.estado, cx.CONECTADO)
+
+    def test_pausa_em_m3_apaga_o_laser(self):
+        self.c.habilitar_controle(True)
+        self.c.iniciar_trabalho("G21\nG90\nM3 S850\nG1 X100 Y0 F600\nG1 X100 Y50\nM5\n")
+        rodar(self.c, 1.0)
+        self.c.pausar()
+        rodar(self.c, 1.0)
+        self.assertIn(bytes([0x9E]), self.tr.escrito)
+        self.assertFalse(self.sim.emitindo)
+        antes = self.sim.emissao_parada_s
+        rodar(self.c, 2.0)
+        self.assertEqual(self.sim.emissao_parada_s, antes)  # pausado e apagado
+        self.c.retomar()
+        rodar(self.c, 0.5)
+        self.assertTrue(self.sim.emitindo)  # retomar religa
+        self.c.parar()
 
     def test_pausar_retomar_e_parar_durante_trabalho(self):
         self.c.habilitar_controle(True)

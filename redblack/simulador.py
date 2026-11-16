@@ -26,7 +26,7 @@ BOAS_VINDAS = f"Grbl {VERSAO} ['$' for help]"
 RX_BYTES = 128
 PLANNER_BLOCOS = 15
 MAX_LINHA = 80
-TEMPO_REAL = {ord("?"), ord("!"), ord("~"), 0x18, 0x85}
+TEMPO_REAL = {ord("?"), ord("!"), ord("~"), 0x18, 0x85, 0x9E}
 
 CONFIG_PADRAO = {  # valores típicos de GRBL; NÃO são os da SCULPFUN (serão lidos na Etapa 13)
     0: 10, 1: 25, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 10: 1, 11: 0.010, 12: 0.002, 13: 0, 20: 0, 21: 0,
@@ -86,6 +86,7 @@ class SimuladorGrbl:
         self.s = 0.0
         self.spindle = "M5"
         self.ar, self._ar_mudou = False, False  # M8 (air assist); o reset desliga
+        self.laser_parado_ovr = False  # 0x9E na pausa
         self.hold = False
         self.check = False
         self.homing_restante = None
@@ -120,6 +121,10 @@ class SimuladorGrbl:
                 self.hold = True
         elif b == ord("~"):
             self.hold = False
+            self.laser_parado_ovr = False  # retomar religa o laser
+        elif b == 0x9E:  # parada do spindle/laser: só vale em HOLD (como no GRBL 1.1)
+            if self.hold:
+                self.laser_parado_ovr = True
         elif b == 0x18:
             em_movimento = bool(self.planner) or self.homing_restante is not None
             self._boot(alarme=3 if em_movimento else None)
@@ -323,7 +328,8 @@ class SimuladorGrbl:
                 self._concluir_homing_se_pronto()
                 continue
             if not self.planner or self.hold:
-                if not self.hold and not self.check and self.spindle == "M3" and self.s > 0 \
+                # GRBL real: em M3 o laser continua ACESO parado, inclusive na pausa (!), até 0x9E/M5/reset
+                if not self.check and self.spindle == "M3" and self.s > 0 and not self.laser_parado_ovr \
                         and self.config[32] and self.estado_base != "Alarm":
                     self.emissao_parada_s += restante  # M3: laser ligado parado
                 self.tempo += restante
@@ -375,8 +381,11 @@ class SimuladorGrbl:
     @property
     def emitindo(self) -> bool:
         """Laser emitindo agora (movimento com potência, ou M3 com S>0 parado)."""
-        if self.estado in ("Alarm", "Hold:0", "Home", "Check"):
+        if self.estado in ("Alarm", "Home", "Check"):
             return False
+        if self.estado.startswith("Hold"):  # M3 continua aceso na pausa (perigo real do GRBL), M4 apaga parado
+            return (self.spindle == "M3" and self.s > 0 and bool(self.config[32]) and not self.laser_parado_ovr
+                    and self.estado == "Hold:0")
         if self.planner:
             return self.planner[0].potencia > 0
         return self.spindle == "M3" and self.s > 0 and bool(self.config[32])

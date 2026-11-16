@@ -139,7 +139,9 @@ class EstadosTest(unittest.TestCase):
         self.assertTrue(sim.emitindo)
         sim.receber(b"!")
         self.assertEqual(sim.estado, "Hold:0")
-        self.assertFalse(sim.emitindo)                 # pausa apaga o laser
+        self.assertTrue(sim.emitindo)                  # GRBL real: em M3 a pausa NÃO apaga o laser
+        sim.receber(bytes([0x9E]))                     # parada do laser na pausa
+        self.assertFalse(sim.emitindo)
         parado = sim.pos
         sim.avancar(5)
         self.assertEqual(sim.pos, parado)
