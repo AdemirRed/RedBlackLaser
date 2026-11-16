@@ -4,7 +4,7 @@
 
 **Software próprio para desenhar, preparar e cortar/gravar a laser, do vetor ao G-code e à máquina GRBL.**
 
-![versão](https://img.shields.io/badge/versão-0.54.1-e0313b)
+![versão](https://img.shields.io/badge/versão-0.54.2-e0313b)
 ![python](https://img.shields.io/badge/Python-3.10%2B-3776ab)
 ![qt](https://img.shields.io/badge/PySide6-Qt%206-41cd52)
 ![testes](https://img.shields.io/badge/testes-632%20passando-1fa34a)

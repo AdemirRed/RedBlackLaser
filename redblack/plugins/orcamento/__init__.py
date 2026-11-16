@@ -7,6 +7,8 @@ Separação usada (para não confundir valor de referência com dinheiro que sai
   • REMUNERAÇÃO DA MÁQUINA — tempo de laser × (hora de laser cobrada − custo operacional/h).
   • CUSTO = só o desembolso (o que sai do bolso). Hora de laser e trabalho manual são do próprio dono: entram no
     PREÇO (o cliente paga), nunca no custo — senão um corte longo dá "prejuízo" que não existe.
+  • Valores padrão calibrados com o dono (16/11/2026): quadro da Carine (3 placas, 2 h 56 min de laser, 2 h de
+    mão de obra) = R$ 60; Tyfani e Valentina = R$ 35 a 40.
   • PREÇO por placa (padrão): placas × R$ por placa + pintura (valor do projeto completo até N placas, + R$ por
     placa acima disso) + tempo de laser × hora de máquina + trabalho manual × sua hora. Preço informado na mão vence; preço por placa 0 = custo + margem.
   • LUCRO = preço − desembolso (o que fica para você: paga o seu tempo de laser e o seu trabalho manual).
@@ -45,13 +47,13 @@ CAMPOS = {
     "insumos": ("Outros insumos por peça (embalagem, fita…)", 0.0, "dado"),
     "laser_min": ("Tempo de laser por peça (min)", 0.0, "dado"),
     "custo_oper_hora": ("Custo OPERACIONAL do laser por hora (energia, manutenção, desgaste)", 0.0, "dado"),
-    "hora_maquina": ("Hora de máquina (laser)", 50.0, "decisao"),
+    "hora_maquina": ("Hora de máquina (laser)", 7.49, "decisao"),
     "manual_min": ("Trabalho manual por peça (min)", 0.0, "dado"),
-    "hora_manual": ("Sua hora de trabalho manual", 15.0, "decisao"),
+    "hora_manual": ("Sua hora de trabalho manual", 3.0, "decisao"),
     "fixos": ("Custos do pedido (frete, arte nova…)", 0.0, "dado"),
-    "preco_placa": ("Preço cobrado por placa de MDF (0 = usar a margem)", 8.0, "decisao"),
+    "preco_placa": ("Preço cobrado por placa de MDF (0 = usar a margem)", 6.0, "decisao"),
     "pintura": ("Projeto pintado", 1, "decisao"),
-    "pintura_preco": ("Pintura do projeto completo (até o limite de placas)", 20.0, "decisao"),
+    "pintura_preco": ("Pintura do projeto completo (até o limite de placas)", 14.0, "decisao"),
     "pintura_limite": ("Placas incluídas no valor da pintura", 10, "decisao"),
     "pintura_extra": ("Pintura: a mais por placa acima do limite", 3.0, "decisao"),
     "margem_pct": ("Margem sobre o custo (%) sem preço informado nem preço por placa", 50.0, "decisao"),
@@ -65,8 +67,8 @@ DESCONTOS = ((1, 0.0), (5, 5.0), (10, 10.0), (20, 15.0))  # quantidade mínima �
 CONFIRMADOS_INICIAIS = {"chapa_preco": True, "placas_por_chapa": True, "camadas": True, "tinta_preco": True,
                         "tinta_ml": True, "cola_preco": True}
 MODELOS_INICIAIS = {
-    "Tyfani": {"laser_min": 35.0, "manual_min": 10.0, "preco_manual": 60.0},
-    "Valentina Hellena": {"laser_min": 20.0, "manual_min": 25.0, "preco_manual": 50.0},
+    "Tyfani": {"laser_min": 35.0, "manual_min": 10.0, "preco_manual": 0.0},  # preço pela regra: ≈ R$ 37
+    "Valentina Hellena": {"laser_min": 20.0, "manual_min": 25.0, "preco_manual": 0.0},  # ≈ R$ 36
 }
 
 

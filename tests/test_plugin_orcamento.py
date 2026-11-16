@@ -35,37 +35,40 @@ class OrcamentoTest(unittest.TestCase):
         self.assertEqual(r["sobra_placas"], 2)
         self.assertAlmostEqual(r["tinta"], 1.53)          # R$ 46 / 900 ml × 30 ml
         self.assertAlmostEqual(r["cola"], 1.11)           # R$ 39 / 35 peças
-        self.assertAlmostEqual(r["remun_maquina"], 29.17)  # 35 min × R$ 50/h
-        self.assertAlmostEqual(r["manual"], 2.50)         # 10 min × R$ 15/h
+        self.assertAlmostEqual(r["remun_maquina"], 4.37)   # 35 min × R$ 7,49/h
+        self.assertAlmostEqual(r["manual"], 0.50)         # 10 min × R$ 3/h
         self.assertAlmostEqual(r["desembolso"], 6.42)     # dinheiro que sai de fato
         self.assertAlmostEqual(r["custo"], 6.42)          # laser e mão de obra são ganho do dono, não custo
-        self.assertAlmostEqual(r["preco"], 60.0)
-        self.assertAlmostEqual(r["lucro"], 53.58)
+        self.assertAlmostEqual(r["preco"], 36.87)          # 3 × R$ 6 + pintura R$ 14 + laser + mão de obra
+        self.assertAlmostEqual(r["lucro"], 30.45)
+        carine = orc.orcar({"camadas": 3, "laser_min": 176.2, "manual_min": 120})  # calibrado com o dono
+        self.assertAlmostEqual(carine["preco"], 60.0)
+        self.assertTrue(35 <= orc.orcar(dict(orc.MODELOS_INICIAIS["Valentina Hellena"]))["preco"] <= 40)
         longo = orc.orcar({"camadas": 3, "laser_min": 180})  # 3 h de laser cobrando por placa: nunca "prejuízo"
         self.assertGreater(longo["lucro"], 0)
         t = orc.tabela_descontos(dict(orc.MODELOS_INICIAIS["Valentina Hellena"]))
         self.assertEqual([x[0] for x in t], [1, 5, 10, 20])
-        self.assertAlmostEqual(t[3][2], 42.5)              # 15 % de desconto em 20+
+        self.assertAlmostEqual(t[3][2], 30.39)             # 15 % de desconto em 20+ (R$ 35,75 − 15 %)
         self.assertTrue(orc.dicas(r, orc.MODELOS_INICIAIS["Tyfani"] | {k: d for k, (_, d, _t) in orc.CAMPOS.items()
                                                                           if k not in orc.MODELOS_INICIAIS["Tyfani"]}))
         with self.assertRaises(ValueError):
             orc.orcar({"camadas": 0})
 
     def test_preco_por_placa_e_pintura(self):
-        r = orc.orcar({"camadas": 3})  # padrão: R$ 8 por placa + pintura R$ 20 (até 10 placas)
+        r = orc.orcar({"camadas": 3})  # padrão: R$ 6 por placa + pintura R$ 14 (até 10 placas)
         self.assertTrue(r["por_placa"])
-        self.assertAlmostEqual(r["cobr_placas"], 24.0)
-        self.assertAlmostEqual(r["cobr_pintura"], 20.0)
-        self.assertAlmostEqual(r["preco"], 44.0)
+        self.assertAlmostEqual(r["cobr_placas"], 18.0)
+        self.assertAlmostEqual(r["cobr_pintura"], 14.0)
+        self.assertAlmostEqual(r["preco"], 32.0)
         r = orc.orcar({"camadas": 12})  # 2 placas acima de 10: + 2 × R$ 3 na pintura
-        self.assertAlmostEqual(r["cobr_pintura"], 26.0)
-        self.assertAlmostEqual(r["preco"], 12 * 8 + 26)
+        self.assertAlmostEqual(r["cobr_pintura"], 20.0)
+        self.assertAlmostEqual(r["preco"], 12 * 6 + 20)
         r = orc.orcar({"camadas": 12, "pintura": 0})  # sem pintura: só as placas, e a tinta sai do custo
-        self.assertAlmostEqual(r["preco"], 96.0)
+        self.assertAlmostEqual(r["preco"], 72.0)
         self.assertEqual(r["tinta"], 0.0)
         self.assertAlmostEqual(orc.orcar({"camadas": 3, "preco_manual": 70})["preco"], 70.0)  # preço na mão vence
         r = orc.orcar({"camadas": 3, "laser_min": 60, "manual_min": 30})  # corte e mão de obra: o cliente paga
-        self.assertAlmostEqual(r["preco"], 24 + 20 + 50 + 7.5)
+        self.assertAlmostEqual(r["preco"], 18 + 14 + 7.49 + 1.5)
         self.assertAlmostEqual(r["custo"], r["desembolso"])  # mas não são custo
 
     def test_tempo_das_abas_e_janela(self):
@@ -84,7 +87,7 @@ class OrcamentoTest(unittest.TestCase):
         self.assertIn("Projeto (2 abas)", w.tempo_label.text())
         self.assertIn("orcamento", [a for a in ("orcamento",) if hasattr(w, "plugin_orcamento")])
         j = w.plugin_orcamento["abrir"]()
-        self.assertAlmostEqual(j.valor_hora.value(), 50.0)  # referência de preço do levantamento
+        self.assertAlmostEqual(j.valor_hora.value(), 7.49)  # calibrado: quadro da Carine = R$ 60
         self.assertEqual(j.origem.currentData(), "total")  # puxa do plano aberto por padrão
         self.assertAlmostEqual(j.minutos.value(), t["total"] / 60, places=1)
         self.assertEqual(j.abas.count(), 2)  # Orçamento + Configurações
@@ -105,7 +108,7 @@ class OrcamentoTest(unittest.TestCase):
         j.campos["preco_manual"].setValue(0)
         j.campos["camadas"].setValue(3)
         j.campos["pintura"].setValue(1)
-        self.assertIn("3 placa(s) de MDF × R$ 8,00", j.texto_cliente())
+        self.assertIn("3 placa(s) de MDF × R$ 6,00", j.texto_cliente())
         self.assertIn("Placas cobradas", [j.tabela.item(i, 0).text() for i in range(j.tabela.rowCount())])
         j.close()
         w.close()

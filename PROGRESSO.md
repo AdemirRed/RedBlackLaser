@@ -760,3 +760,9 @@ laser desligado.
   Antes o tempo de corte não entrava no preço (Carine: 2 h 56 min de laser e o preço ficava em R$ 44).
 - Continuam fora do custo (custo = só o que sai do bolso); a composição no PDF e no texto do cliente mostra
   "corte a laser" e "mão de obra".
+
+## 0.54.2 — valores do orçamento calibrados (quadro = R$ 60, os outros R$ 35 a 40)
+- Padrões novos: R$ 6 por placa, pintura R$ 14 (até 10 placas, + R$ 3 por placa acima), hora de máquina R$ 7,49,
+  mão de obra R$ 3/h. Com eles: quadro da Carine (3 placas, 2 h 56 min de laser, 2 h manual) = R$ 60,00;
+  Tyfani = R$ 36,87; Valentina = R$ 35,75 (os dois sem preço fixo: passam a seguir a regra).
+- A 0.54.1 cobrava R$ 8/placa + R$ 20 de pintura + R$ 30–50/h: o quadro saía por R$ 160–205.
