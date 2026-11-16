@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import pymupdf  # noqa: E402
 from PySide6.QtCore import QPointF, QRectF, Qt  # noqa: E402
-from PySide6.QtGui import QImage, QPainter, QPainterPath, QTransform  # noqa: E402
+from PySide6.QtGui import QImage, QPainter, QPainterPath, QPainterPathStroker, QTransform  # noqa: E402
 
 from redblack import camadas as cm  # noqa: E402
 from redblack import materiais as mt  # noqa: E402
@@ -29,6 +29,7 @@ PT = 25.4 / 72
 
 # cor do PDF -> camada (ordem de saída = ordem desta lista)
 CAMADAS = [("C05", "Corações gravados (1º)", "grav"),
+           ("C06", "Guia das letras na faixa (linha fraca)", "guia"),
            ("C02", "Teste de encaixe 8,9–9,7 (opcional, 2º)", "corte"),
            ("C03", "Pés, letras e espaçadores (3º)", "corte"),
            ("C04", "Janelas da frente (4º)", "corte"),
@@ -82,6 +83,33 @@ def ler(pdf):
     return [(n, caminho(d), _camada(d["color"])) for n in (1, 2) for d in doc[n].get_drawings()]
 
 
+FAIXAS_PDF = {"Apollo": QPointF(185.0, 303.0), "Emily": QPointF(185.0, 348.0)}  # centro da faixa de cima / de baixo
+RECUO_GUIA = 0.4  # mm para dentro do contorno da letra: a letra colada cobre a marca
+
+
+def guias(itens):
+    """Contorno de cada nome gravado fraco NA FAIXA onde vai ser colado (centralizado), um pouco para dentro da
+    letra — gabarito para colar as letras soltas na posição certa. [(2, path, "C06")] no sistema do PDF."""
+    letras = [p for n, p, lid in itens if n == 1 and lid == "C03" and p.boundingRect().width() < 50
+              and 140 < p.boundingRect().top() < 175]
+    assert len(letras) == 11, f"esperava 11 letras (Apollo + Emily), achei {len(letras)}"
+    st = QPainterPathStroker()
+    st.setWidth(2 * RECUO_GUIA)
+    out = []
+    for nome, centro in FAIXAS_PDF.items():
+        grupo = [p for p in letras if (p.boundingRect().center().x() < 185) == (nome == "Apollo")]
+        caixa = QRectF()
+        for p in grupo:
+            caixa = caixa.united(p.boundingRect())
+        d = centro - caixa.center()
+        for p in grupo:
+            q = QPainterPath(p)
+            q.setFillRule(Qt.OddEvenFill)
+            out.append((2, QTransform.fromTranslate(d.x(), d.y()).map(q.subtracted(st.createStroke(q)).simplified()),
+                        "C06"))
+    return out
+
+
 def arrumar(itens):
     """Afasta da borda e entre si (no sistema do PDF) e devolve {página: [(path, camada, nome)]} já girado."""
     giro = QTransform(0, -1, 1, 0, 0, CHAPA_W)  # (x, y) -> (y, 370 − x): 90° sem espelhar; mesa 365 × 370
@@ -102,7 +130,8 @@ def arrumar(itens):
                 k = 0 if r.top() < 325 else 1
                 topo_pdf = (288.0, 333.0)[k]
                 dy = base + k * (30.0 + ESPACO) - topo_pdf
-                nome = "Corações" if lid == "C05" else ("Faixa de cima (Apollo)", "Faixa de baixo (pés)")[k]
+                nome = {"C05": "Corações", "C06": f"Guia: cole {('Apollo', 'Emily')[k]} aqui"}.get(
+                    lid, ("Faixa de cima (Apollo)", "Faixa de baixo (Emily, com alívios)")[k])
         if not nome:
             nome = {"C02": "Teste de encaixe", "C03": "Pé" if r.width() > 50 else "Letra"}.get(lid, lid)
         out[n].append((giro.map(QTransform.fromTranslate(0, dy).map(p)), lid, nome))
@@ -118,7 +147,7 @@ def aproveitamento(pecas):
     pt.scale(esc, esc)
     pt.setPen(Qt.NoPen)
     for p, lid, _ in sorted(pecas, key=lambda t: -t[0].boundingRect().width() * t[0].boundingRect().height()):
-        if lid == "C05":
+        if lid in ("C05", "C06"):
             continue
         q = QPainterPath(p)
         q.setFillRule(Qt.OddEvenFill)
@@ -135,7 +164,9 @@ def camadas():
     out = []
     for lid, nome, tipo in CAMADAS:
         c = cm.Camada(lid, nome)
-        if tipo == "grav":
+        if tipo == "guia":  # só marca o lugar: linha fina e fraca (M4), some debaixo da letra
+            c = cm.alterar(c, modo="linha", velocidade_mm_min=3000.0, potencia_max=10.0, potencia_min=0.0, passadas=1)
+        elif tipo == "grav":
             c = cm.alterar(c, modo="preenchimento", velocidade_mm_min=3000.0, potencia_max=15.0, potencia_min=0.0,
                            passadas=1, intervalo_mm=0.1)
         else:
@@ -145,7 +176,8 @@ def camadas():
 
 
 def gerar(pdf, saida):
-    folhas = arrumar(ler(pdf))
+    itens = ler(pdf)
+    folhas = arrumar(itens + guias(itens))
     snaps = {n: [ob.Shape(p, nome, lid, cm.cor(lid)).snapshot() for p, lid, nome in folhas[n]] for n in (1, 2)}
     # conferência: tudo dentro da mesa 365 × 370 com MARGEM da borda
     for n in (1, 2):
@@ -159,7 +191,9 @@ def gerar(pdf, saida):
              f"girada 90° para caber na mesa).\n"
              f"Peças a {MARGEM:g} mm da borda da chapa (não queima a borda) e {ESPACO:g} mm entre si.\n"
              f"Aproveitamento: chapa 1 {ap[1]:.0%}, chapa 2 {ap[2]:.0%}.\n"
-             "Ordem: C05 grava os corações (3000 mm/min, 15 %) → C02 teste de encaixe 8,9/9,1/9,3/9,5/9,7 "
+             "Ordem: C05 grava os corações (3000 mm/min, 15 %) → C06 grava fraco (3000 mm/min, 10 %) o contorno de "
+             "Apollo na faixa de cima e de Emily na de baixo, centralizados: cole cada letra em cima do desenho dela "
+             "(a marca fica 0,4 mm para dentro e some debaixo da letra) → C02 teste de encaixe 8,9/9,1/9,3/9,5/9,7 "
              "(opcional: desligue a Saída se não quiser) → C03 pés, letras e espaçadores → C04 janelas → C01 frente, "
              "fundo e faixas. Cortes 650 mm/min, 85 %, 2 passadas.\n"
              "Corte o teste primeiro, empilhe três retalhos e confira qual encaixe fica justo; se não for o 9,3, "
