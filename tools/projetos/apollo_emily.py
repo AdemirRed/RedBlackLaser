@@ -127,29 +127,31 @@ def _externo(p):
     return out
 
 
-PLACA_SOBRA, TRILHO = 10.0, 10.0  # mm que a placa passa da faixa de cada lado; largura de cada trilho (dente)
-TOPO_FAIXA_PDF = {"Apollo": 288.0, "Emily": 333.0}
+LADO_GAB, PONTA_GAB, DENTE = 4.0, 12.0, 6.0  # mm: sobra ao lado das letras, nas pontas; dente (largura = fundo)
 
 
 def gabaritos(itens):
-    """Chapa 3: por nome, placa vazada com as letras (mais larga que a faixa) + 2 trilhos que colam embaixo das
-    bordas compridas e abraçam a faixa (30 mm entre eles). Devolve [(path, camada, nome)] já girado para a mesa."""
+    """Por nome, uma plaquinha com as letras vazadas e um dente igual no meio de cada ponta (como o desenho do
+    usuário). Devolve [(path, camada, nome)] já girado para a mesa."""
     giro = QTransform(0, -1, 1, 0, 0, CHAPA_W)
-    nomes = nomes_na_faixa(itens)
     out, y = [], MARGEM
-    for nome in ("Apollo", "Emily"):
-        alt = 30.0 + 2 * PLACA_SOBRA
-        placa = QPainterPath()
-        placa.addRoundedRect(QRectF(5.0, y, 360.0, alt), 5, 5)
-        mover = QTransform.fromTranslate(0, y + PLACA_SOBRA - TOPO_FAIXA_PDF[nome])
-        out += [(giro.map(_externo(mover.map(p))), "C03", f"Gabarito {nome}: letra vazada") for p in nomes[nome]]
-        out.append((giro.map(placa), "C01", f"Gabarito {nome} (placa 360 × {alt:g})"))
-        y += alt + ESPACO
-        for lado in ("de cima", "de baixo"):
-            t = QPainterPath()
-            t.addRect(QRectF(5.0, y, 360.0, TRILHO))
-            out.append((giro.map(t), "C01", f"Gabarito {nome}: trilho {lado} (cola embaixo, rente à borda da placa)"))
-            y += TRILHO + ESPACO
+    for nome, grupo in nomes_na_faixa(itens).items():
+        caixa = QRectF()
+        for p in grupo:
+            caixa = caixa.united(p.boundingRect())
+        w, h = caixa.width() + 2 * PONTA_GAB, caixa.height() + 2 * LADO_GAB
+        x0, meio = MARGEM, y + h / 2
+        placa = QPainterPath(QPointF(x0, y))
+        for px, py in ((x0 + w, y), (x0 + w, meio - DENTE / 2), (x0 + w - DENTE, meio - DENTE / 2),
+                       (x0 + w - DENTE, meio + DENTE / 2), (x0 + w, meio + DENTE / 2), (x0 + w, y + h), (x0, y + h),
+                       (x0, meio + DENTE / 2), (x0 + DENTE, meio + DENTE / 2), (x0 + DENTE, meio - DENTE / 2),
+                       (x0, meio - DENTE / 2)):
+            placa.lineTo(px, py)
+        placa.closeSubpath()
+        mover = QTransform.fromTranslate(x0 + PONTA_GAB - caixa.left(), y + LADO_GAB - caixa.top())
+        out += [(giro.map(_externo(mover.map(p))), "C03", f"Gabarito {nome}: letra vazada") for p in grupo]
+        out.append((giro.map(placa), "C01", f"Gabarito {nome} ({w:.0f} × {h:.0f})"))
+        y += h + ESPACO
     return out
 
 
@@ -254,14 +256,13 @@ def gerar(pdf, saida):
              "(a marca fica 0,4 mm para dentro e some debaixo da letra) → C02 teste de encaixe 8,9/9,1/9,3/9,5/9,7 "
              "(opcional: desligue a Saída se não quiser) → C03 pés, letras e espaçadores → C04 janelas → C01 frente, "
              "fundo e faixas. Cortes 650 mm/min, 85 %, 2 passadas.\n"
-             "Chapa 3 (retalho de 360 × 165): gabarito vazado de cada nome. Cole os 2 trilhos embaixo da placa, "
-             "rentes às bordas compridas: ficam 30 mm entre eles e a placa veste a faixa no esquadro, com as pontas "
-             "alinhadas às da faixa. Fixe com fita, passe cola no fundo de cada furo e coloque as letras.\n"
+             "Chapa 3 (retalho): gabarito vazado de cada nome, com um dente no meio de cada ponta. Ponha em "
+             "cima da marca gravada na faixa, passe cola nos furos e coloque as letras.\n"
              "Corte o teste primeiro, empilhe três retalhos e confira qual encaixe fica justo; se não for o 9,3, "
              "ajuste os encaixes dos 6 pés antes de cortar a chapa toda.")
     pj.save(saida, snaps[1], camadas(), notas=notas, paginas=[None, (tuple(snaps[2]), (), ()), (tuple(snaps[3]), (), ())],
             pagina_atual=0, nomes_paginas=["Chapa 1 — frente, pés, nomes", "Chapa 2 — fundo e faixas",
-                                           "Chapa 3 — gabaritos das letras (retalho 360 × 165)"])
+                                           "Chapa 3 — gabaritos das letras (retalho)"])
     return saida, ap
 
 
