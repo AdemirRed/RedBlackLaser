@@ -1,0 +1,482 @@
+"""Presépio (MDF 3 mm) a partir do PDF "Presepio_MDF_3mm_Projeto_Completo.pdf" (revisão 02), com as chapas reencaixadas.
+
+O PDF traz as 17 peças em 3 páginas vetoriais 1:1 de 370 × 365 mm (vermelho = contorno, azul = vazados e rasgos,
+preto traço = gravação de linha, preto cheio = gravação das figuras; códigos em texto). Aqui:
+  - as peças ficam iguais ao projeto (encaixes de 3,00 mm, linguetas, tudo do PDF, sem escala);
+  - o encaixe é refeito do zero (mesa 365 × 370, 2 mm da borda e 2 mm entre peças): as peças grandes primeiro e as
+    pequenas também DENTRO dos vazados (vão da fachada, triângulos das laterais, cercas do fundo), que virariam sobra;
+  - peça dentro de um vazado corta ANTES do vazado (camadas próprias): o miolo solto não arrasta a peça;
+  - o código de cada peça é gravado nela (etiquetas.py) e os números do gabarito G01 viram gravação.
+
+Executar:  python tools/projetos/presepio.py <entrada.pdf> <saida.rbl>
+"""
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+import numpy as np  # noqa: E402
+import pymupdf  # noqa: E402
+from PySide6.QtCore import QPointF, QRectF, Qt  # noqa: E402
+from PySide6.QtGui import QFont, QImage, QPainter, QPainterPath, QPainterPathStroker, QTransform  # noqa: E402
+from scipy.signal import fftconvolve  # noqa: E402
+
+from apollo_emily import PT, caminho  # noqa: E402
+from redblack import camadas as cm  # noqa: E402
+from redblack import materiais as mt  # noqa: E402
+from redblack import objetos as ob  # noqa: E402
+from redblack import projeto as pj  # noqa: E402
+
+PAGINAS = (13, 14, 15)          # páginas 14–16 do PDF (0 = primeira): as chapas de corte 1:1
+MESA_W, MESA_H = 365.0, 370.0   # área da mesa (X × Y)
+MARGEM, VAO = 2.0, 2.0          # da borda da chapa e entre peças (mm), pedido do dono
+RES = 2.0                       # px por mm no encaixe por grade
+
+NOMES = {"B01": "Base", "F01": "Fachada com estrela", "F02": "Fundo vazado", "L01": "Lateral esquerda",
+         "L02": "Lateral direita", "T01": "Telhado esquerdo", "T02": "Telhado direito", "P01": "Maria",
+         "P02": "Jesus e manjedoura", "P03": "José", "P04": "Melchior", "P05": "Baltazar", "P06": "Gaspar",
+         "P07": "Ovelha", "P08": "Palmeira", "G01": "Gabarito de folgas", "G02": "Lingueta de teste"}
+
+# camada: (nome, tipo). Ordem de saída = ordem desta lista.
+CORTE_DENTRO_FURO, CONT_DENTRO, FURO, CONT = "C05", "C06", "C02", "C01"
+GRAV_FIG, GRAV_LINHA, GRAV_NUM = "C03", "C04", "C07"
+CAMADAS = [(GRAV_FIG, "Gravação das figuras (preenchida, 1º)", "grav_fig"),
+           (GRAV_LINHA, "Gravação de traço: telhado, estrela, folhas (2º)", "grav_linha"),
+           (GRAV_NUM, "Números do gabarito G01 (gravação)", "grav_fig"),
+           (CORTE_DENTRO_FURO, "Rasgos das peças que estão DENTRO de vazados (3º)", "corte"),
+           (CONT_DENTRO, "Contorno das peças DENTRO de vazados (4º, antes do vazado)", "corte"),
+           (FURO, "Vazados e rasgos (5º)", "corte"),
+           (CONT, "Contornos externos (por último)", "corte")]
+
+
+def _cor(c):
+    return tuple(round(v, 1) for v in c) if c else None
+
+
+def ler(pdf):
+    """{código: {"partes": [(path mm, tipo)], "caixa": QRectF}} — tipo: cont, furo, linha, cheio, num."""
+    doc = pymupdf.open(pdf)
+    pecas = {}
+    for n in PAGINAS:
+        pg = doc[n]
+        itens = []
+        for d in pg.get_drawings():
+            if d["type"] == "f":
+                itens.append((caminho({**d, "closePath": True}), "cheio"))
+            elif _cor(d.get("color")) == (1.0, 0.0, 0.0):
+                itens.append((caminho(d), "cont"))
+            elif _cor(d.get("color")) == (0.0, 0.0, 1.0):
+                itens.append((caminho(d), "furo"))
+            else:
+                itens.append((caminho(d), "linha"))
+        conts = [p for p, t in itens if t == "cont"]
+        textos = [(s["text"].strip(), QRectF(*[v * PT for v in s["bbox"][:2]],
+                                             (s["bbox"][2] - s["bbox"][0]) * PT, (s["bbox"][3] - s["bbox"][1]) * PT),
+                   s["size"]) for b in pg.get_text("dict")["blocks"] for ln in b.get("lines", [])
+                  for s in ln["spans"] if s["text"].strip()]
+
+        def dono(r):
+            c = r.center()
+            cands = [p for p in conts if p.boundingRect().contains(c)]
+            return min(cands, key=lambda p: p.boundingRect().width() * p.boundingRect().height()) if cands else None
+
+        por_cont = {id(p): {"partes": [], "codigo": None} for p in conts}
+        for p, t in itens:
+            alvo = p if t == "cont" else dono(p.boundingRect())
+            if alvo is None:
+                raise ValueError(f"desenho fora de qualquer peça na página {n + 1}: {p.boundingRect()}")
+            por_cont[id(alvo)]["partes"].append((p, t))
+        for txt, r, tam in textos:
+            alvo = dono(r)
+            if alvo is None:
+                continue
+            if re.fullmatch(r"[A-Z]\d\d", txt):
+                por_cont[id(alvo)]["codigo"] = txt
+            else:  # números do gabarito de folgas: gravados
+                por_cont[id(alvo)]["partes"].append((_texto(txt, r, tam * PT), "num"))
+        for p in conts:
+            info = por_cont[id(p)]
+            if info["codigo"] is None:
+                raise ValueError(f"peça sem código na página {n + 1}: {p.boundingRect()}")
+            caixa = QRectF()
+            for q, _ in info["partes"]:
+                caixa = caixa.united(q.boundingRect())
+            pecas[info["codigo"]] = {"partes": info["partes"], "caixa": caixa}
+    return pecas
+
+
+def _texto(txt, r, alt_mm):
+    """Texto do PDF -> contorno (Arial) centrado na mesma caixa."""
+    f = QFont("Arial")
+    f.setPixelSize(100)
+    p = QPainterPath()
+    p.addText(0, 0, f, txt)
+    esc = alt_mm * 0.72 / 100  # altura das maiúsculas ≈ 72 % do corpo
+    p = QTransform.fromScale(esc, esc).map(p)
+    b = p.boundingRect()
+    return QTransform.fromTranslate(r.center().x() - b.center().x(), r.center().y() - b.center().y()).map(p)
+
+
+def _recortar_linhas(partes, caixa):
+    """Gravação de traço só dentro do contorno (o telhado do PDF passa 1 mm da borda: queimaria a peça vizinha)."""
+    r = caixa.adjusted(0.6, 0.6, -0.6, -0.6)
+    out = []
+    for p, t in partes:
+        if t != "linha" or r.contains(p.boundingRect()):
+            out.append((p, t))
+            continue
+        novo = QPainterPath()
+        for poly in p.toSubpathPolygons():
+            pts = list(poly)
+            for a, b in zip(pts, pts[1:]):
+                seg = _clip(a, b, r)
+                if seg:
+                    if novo.elementCount() == 0 or (novo.currentPosition() - seg[0]).manhattanLength() > 1e-6:
+                        novo.moveTo(seg[0])
+                    novo.lineTo(seg[1])
+        if not novo.isEmpty():
+            out.append((novo, t))
+    return out
+
+
+def _clip(a, b, r):
+    """Liang–Barsky: trecho a→b dentro do retângulo r, ou None."""
+    t0, t1 = 0.0, 1.0
+    dx, dy = b.x() - a.x(), b.y() - a.y()
+    for p, q in ((-dx, a.x() - r.left()), (dx, r.right() - a.x()), (-dy, a.y() - r.top()), (dy, r.bottom() - a.y())):
+        if abs(p) < 1e-12:
+            if q < 0:
+                return None
+            continue
+        t = q / p
+        if p < 0:
+            t0 = max(t0, t)
+        else:
+            t1 = min(t1, t)
+        if t0 > t1:
+            return None
+    return QPointF(a.x() + t0 * dx, a.y() + t0 * dy), QPointF(a.x() + t1 * dx, a.y() + t1 * dy)
+
+
+def limpar(pecas):
+    """Tira os rasgos azuis degenerados (tamanho zero) das figuras e recorta as linhas que passam do contorno."""
+    for v in pecas.values():
+        cont = next(p for p, t in v["partes"] if t == "cont")
+        partes = [(p, t) for p, t in v["partes"]
+                  if not (t == "furo" and min(p.boundingRect().width(), p.boundingRect().height()) < 0.1)]
+        v["partes"] = _recortar_linhas(partes, cont.boundingRect())
+        v["cont"] = cont
+    return pecas
+
+
+# ---------------------------------------------------------------- encaixe por grade (bitmap)
+def _raster(paths, caixa, buracos=()):
+    """Bitmap (RES px/mm) da área cheia dos `paths` menos os `buracos`, com a caixa no canto (0, 0)."""
+    w, h = int(np.ceil(caixa.width() * RES)) + 2, int(np.ceil(caixa.height() * RES)) + 2
+    img = QImage(w, h, QImage.Format_Grayscale8)
+    img.fill(0)
+    pt = QPainter(img)
+    pt.scale(RES, RES)
+    pt.translate(-caixa.left(), -caixa.top())
+    pt.setPen(Qt.NoPen)
+    for brush, ps in ((Qt.white, paths), (Qt.black, buracos)):
+        pt.setBrush(brush)
+        for p in ps:
+            pt.drawPath(p)
+    pt.end()
+    a = np.frombuffer(img.constBits(), np.uint8).reshape(h, img.bytesPerLine())[:, :w]
+    return a > 0
+
+
+def _disco(r):
+    y, x = np.ogrid[-r:r + 1, -r:r + 1]
+    return x * x + y * y <= r * r
+
+
+GIROS = (0, 90, 180, 270)
+FURO_GRANDE = 150.0  # mm²: vazado onde cabe peça (os rasgos de 3 mm continuam "cheios" no encaixe)
+
+
+def _girar(p, ang):
+    return QTransform().rotate(ang).map(p)
+
+
+def encaixar(pecas, n_chapas=4):
+    """Coloca as peças (maiores primeiro) na 1ª chapa onde couberem, também dentro dos vazados das já postas.
+    Devolve {código: (chapa, ângulo, dx, dy)}: peça girada `ângulo` em torno da origem e deslocada (dx, dy)."""
+    from scipy.ndimage import binary_dilation
+    gw, gh = int(MESA_W * RES), int(MESA_H * RES)
+    ocupado = [np.zeros((gh, gw), bool) for _ in range(n_chapas)]
+    usado = [None] * n_chapas  # caixa (y0, x0, y1, x1) em px do que já está na chapa
+    folga = int(np.ceil(VAO * RES)) + 1  # +1 px: o bitmap arredonda
+    disco = _disco(folga)
+    ordem = sorted(pecas, key=lambda k: -pecas[k]["cont"].boundingRect().width()
+                   * pecas[k]["cont"].boundingRect().height())
+    pos = {}
+    for k in ordem:
+        v = pecas[k]
+        melhor = None
+        for ch in range(n_chapas):
+            for ang in GIROS:
+                c = _girar(v["cont"], ang)
+                cx = c.boundingRect().adjusted(-folga / RES, -folga / RES, folga / RES, folga / RES)
+                pe = binary_dilation(_raster([c], cx), disco)  # pegada com o vão em volta
+                if pe.shape[0] > gh or pe.shape[1] > gw:
+                    continue
+                sobre = fftconvolve(ocupado[ch].astype(np.float32), pe[::-1, ::-1].astype(np.float32), mode="valid")
+                livres = np.argwhere(sobre < 0.5)
+                if not len(livres):
+                    continue
+                ys, xs = livres[:, 0], livres[:, 1]
+                if usado[ch] is None:
+                    cresce = np.zeros(len(ys))
+                else:  # quanto a caixa ocupada da chapa cresce: dentro de um vazado = 0 (a sobra fica inteira)
+                    y0, x0, y1, x1 = usado[ch]
+                    cresce = ((np.maximum(y1, ys + pe.shape[0]) - np.minimum(y0, ys))
+                              * (np.maximum(x1, xs + pe.shape[1]) - np.minimum(x0, xs)) - (y1 - y0) * (x1 - x0))
+                i = np.lexsort((xs, ys + pe.shape[0], cresce))[0]  # menos crescimento, mais acima, à esquerda
+                y, x = int(ys[i]), int(xs[i])
+                nota = (ch, float(cresce[i]), y + pe.shape[0], x)
+                if melhor is None or nota < melhor[0]:
+                    melhor = (nota, ch, ang, x / RES - cx.left(), y / RES - cx.top())
+            if melhor is not None:
+                break
+        if melhor is None:
+            raise RuntimeError(f"{k} não coube em {n_chapas} chapas")
+        nota, ch, ang, dx, dy = melhor
+        pos[k] = (ch, ang, dx, dy)
+        caixa = (QTransform().rotate(ang) * QTransform.fromTranslate(dx, dy)).map(v["cont"]).boundingRect()
+        nova = (caixa.top() * RES, caixa.left() * RES, caixa.bottom() * RES, caixa.right() * RES)
+        usado[ch] = nova if usado[ch] is None else (min(usado[ch][0], nova[0]), min(usado[ch][1], nova[1]),
+                                                     max(usado[ch][2], nova[2]), max(usado[ch][3], nova[3]))
+        tf = QTransform().rotate(ang) * QTransform.fromTranslate(dx, dy)
+        buracos = [tf.map(p) for p, t in v["partes"] if t == "furo" and _area(p) > FURO_GRANDE]
+        mat = _raster([tf.map(v["cont"])], QRectF(0, 0, MESA_W, MESA_H), buracos)[:gh, :gw]
+        ocupado[ch][:mat.shape[0], :mat.shape[1]] |= mat
+    return pos
+
+
+def _area(p):
+    return max((abs(sum(a.x() * b.y() - b.x() * a.y() for a, b in zip(q, list(q)[1:] + list(q)[:1]))) / 2
+                for q in p.toSubpathPolygons()), default=0.0)
+
+
+# ---------------------------------------------------------------- montagem do projeto
+TIPO_CAMADA = {"cheio": GRAV_FIG, "linha": GRAV_LINHA, "num": GRAV_NUM, "furo": FURO, "cont": CONT}
+DESC = {"cheio": "gravação", "linha": "gravação de traço", "num": "números", "furo": "rasgo/vazado",
+        "cont": "contorno"}
+
+
+def folhas(pecas, pos):
+    """[[(código, [(path na mesa, camada)])] por chapa]. Peça dentro de vazado de outra: camadas "DENTRO"."""
+    n = max(ch for ch, *_ in pos.values()) + 1
+    out = [[] for _ in range(n)]
+    tfs = {k: QTransform().rotate(a) * QTransform.fromTranslate(dx, dy) for k, (_, a, dx, dy) in pos.items()}
+    vazados = {k: [tfs[k].map(p) for p, t in pecas[k]["partes"] if t == "furo" and _area(p) > FURO_GRANDE]
+               for k in pecas}
+    for k in sorted(pecas):
+        ch = pos[k][0]
+        meio = tfs[k].map(pecas[k]["cont"]).boundingRect().center()
+        dentro = any(h.contains(meio) for o in pecas if o != k and pos[o][0] == ch for h in vazados[o])
+        partes = []
+        for p, t in pecas[k]["partes"]:
+            lid = TIPO_CAMADA[t]
+            if dentro and t == "cont":
+                lid = CONT_DENTRO
+            elif dentro and t == "furo":
+                lid = CORTE_DENTRO_FURO
+            partes.append((tfs[k].map(p), lid, t))
+        out[ch].append((k, partes, dentro))
+    return out
+
+
+def camadas():
+    corte = mt.corte_mdf(3)  # 650 mm/min, 85 %, 2 passadas (nunca 100 %)
+    out = []
+    for lid, nome, tipo in CAMADAS:
+        c = cm.Camada(lid, nome)
+        if tipo == "grav_fig":  # gravação fraca some abaixo de 25 % a 3000 mm/min nesta máquina
+            c = cm.alterar(c, modo="preenchimento", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0,
+                           passadas=1, intervalo_mm=0.1)
+        elif tipo == "grav_linha":
+            c = cm.alterar(c, modo="linha", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0, passadas=1)
+        else:
+            c = cm.alterar(c, **corte)
+        out.append(c)
+    return out
+
+
+def aproveitamento(chapa):
+    mat = np.zeros((int(MESA_H * RES), int(MESA_W * RES)), bool)
+    for _k, partes, _d in chapa:
+        cont = [p for p, _l, t in partes if t == "cont"]
+        bur = [p for p, _l, t in partes if t == "furo"]
+        m = _raster(cont, QRectF(0, 0, MESA_W, MESA_H), bur)[:mat.shape[0], :mat.shape[1]]
+        mat[:m.shape[0], :m.shape[1]] |= m
+    return mat.mean()
+
+
+def gerar(pdf, saida):
+    pecas = limpar(ler(pdf))
+    pos = encaixar(pecas)
+    chapas = folhas(pecas, pos)
+    snaps = []
+    for chapa in chapas:
+        grupos = []
+        for k, partes, _dentro in chapa:
+            itens = [ob.Shape(p, f"{k} — {DESC[t]}", lid, cm.cor(lid)) for p, lid, t in partes]
+            g = ob.group(itens)
+            g.name = f"{k} {NOMES[k]}"
+            grupos.append(g.snapshot())
+            caixa = QRectF()
+            for p, _l, _t in partes:
+                caixa = caixa.united(p.boundingRect())
+            assert QRectF(MARGEM - 0.01, MARGEM - 0.01, MESA_W - 2 * MARGEM + 0.02,
+                          MESA_H - 2 * MARGEM + 0.02).contains(caixa), (k, caixa)
+        snaps.append(tuple(grupos))
+    ap = [aproveitamento(c) for c in chapas]
+    nomes = [f"Chapa {i + 1}" for i in range(len(chapas))]  # nome curto (limite da aba); peças nas notas
+    dentro = sorted(k for c in chapas for k, _p, d in c if d)
+    notas = ("Presépio MDF 3 mm (PDF revisão 02): 17 peças iguais ao projeto, reencaixadas em "
+             f"{len(chapas)} chapas de 365 × 370 mm, {MARGEM:g} mm da borda e {VAO:g} mm entre peças.\n"
+             + "".join(f"Chapa {i + 1}: " + ", ".join(f"{k} {NOMES[k]}" for k, *_ in sorted(c)) + ".\n"
+                       for i, c in enumerate(chapas))
+             + "Aproveitamento: " + ", ".join(f"chapa {i + 1} {a:.0%}" for i, a in enumerate(ap)) + ".\n"
+             f"Peças dentro dos vazados de outras (sobra que vira peça): {', '.join(dentro) or 'nenhuma'}. "
+             "Elas cortam ANTES do vazado (camadas C05 e C06): o miolo solto não arrasta a peça.\n"
+             "Ordem: C09 códigos das peças → C03 figuras (preenchida 3000 mm/min, 25 %) → C04 telhado, estrela e "
+             "folhas (traço 3000 mm/min, 25 %) → C07 números do gabarito → C05/C06 peças dentro de vazados → C02 "
+             "vazados e rasgos → C01 contornos. Cortes 650 mm/min, 85 %, 2 passadas.\n"
+             "Corte primeiro G01 + G02 (gabarito de folgas 2,80–3,20) e confira o encaixe antes das chapas. "
+             "Montagem: siga o guia do PDF (as peças e os códigos são os mesmos).")
+    pj.save(saida, snaps[0], camadas(), notas=notas,
+            paginas=[None] + [(s, (), ()) for s in snaps[1:]], pagina_atual=0, nomes_paginas=nomes)
+    import etiquetas
+    etiquetas.etiquetar(saida, saida)
+    _letras_25(saida)
+    return saida, ap, nomes, dentro, chapas
+
+
+def _letras_25(caminho_rbl):
+    """Códigos gravados a 25 % (a 15 % não aparecem nesta máquina a 3000 mm/min)."""
+    import json
+    with open(caminho_rbl, encoding="utf-8") as f:
+        d = json.load(f)
+    for c in d["camadas"]:
+        if c["id"] == "C09":
+            c["potencia_max"] = 25.0
+    with open(caminho_rbl, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+
+
+def _desenhar_chapa(pt, chapa, rotulos=True):
+    from PySide6.QtGui import QColor, QPen
+    cores = {GRAV_FIG: "#222222", GRAV_LINHA: "#666666", GRAV_NUM: "#222222", FURO: "#2f6bff", CONT: "#e0313b",
+             CONT_DENTRO: "#ff8c00", CORTE_DENTRO_FURO: "#00a0a0"}
+    pt.fillRect(QRectF(0, 0, MESA_W, MESA_H), QColor("#d9d9d9"))
+    pt.fillRect(QRectF(MARGEM, MARGEM, MESA_W - 2 * MARGEM, MESA_H - 2 * MARGEM), QColor("#f3e3c3"))
+    for k, partes, _d in chapa:
+        for p, lid, t in partes:
+            if t in ("cheio", "num"):
+                pt.setPen(Qt.NoPen)
+                pt.setBrush(QColor(cores[lid]))
+            else:
+                pt.setPen(QPen(QColor(cores[lid]), 0.4))
+                pt.setBrush(Qt.NoBrush)
+            pt.drawPath(p)
+    if rotulos:
+        f = QFont("Arial")
+        f.setPixelSize(9)
+        f.setBold(True)
+        pt.setFont(f)
+        for k, partes, _d in chapa:
+            c = next(p for p, _l, t in partes if t == "cont").boundingRect().center()
+            caixa = QRectF(c.x() - 13, c.y() - 6, 26, 12)
+            pt.setPen(Qt.NoPen)
+            pt.setBrush(QColor(255, 255, 255, 220))
+            pt.drawRoundedRect(caixa, 2, 2)
+            pt.setPen(QColor("#006400"))
+            pt.drawText(caixa, Qt.AlignCenter, k)
+
+
+def mapa_pdf(chapas, ap, pdf):
+    """Uma página A4 por chapa: desenho com os códigos e a lista das peças (o guia de montagem é o do PDF)."""
+    from PySide6.QtCore import QMarginsF
+    from PySide6.QtGui import QColor, QPageLayout, QPageSize, QPdfWriter
+    w = QPdfWriter(pdf)
+    w.setPageLayout(QPageLayout(QPageSize(QPageSize.A4), QPageLayout.Portrait, QMarginsF(0, 0, 0, 0)))
+    w.setResolution(300)
+    pt = QPainter(w)
+    pt.setRenderHint(QPainter.Antialiasing)
+    mm = 300 / 25.4
+    for i, chapa in enumerate(chapas):
+        if i:
+            w.newPage()
+        pt.save()
+        pt.scale(mm, mm)
+        f = QFont("Arial")
+        f.setPixelSize(7)
+        f.setBold(True)
+        pt.setFont(f)
+        pt.setPen(QColor("#b3121b"))
+        pt.drawText(QRectF(12, 8, 186, 10), Qt.AlignLeft | Qt.AlignVCenter,
+                    f"PRESÉPIO MDF 3 mm — Chapa {i + 1} de {len(chapas)}")
+        f.setPixelSize(4)
+        f.setBold(False)
+        pt.setFont(f)
+        pt.setPen(QColor("#333333"))
+        pt.drawText(QRectF(12, 18, 186, 6), Qt.AlignLeft | Qt.AlignVCenter,
+                    f"Mesa 365 × 370 mm · 2 mm da borda e entre peças · aproveitamento {ap[i]:.0%}")
+        esc = 186 / MESA_W
+        pt.save()
+        pt.translate(12, 27)
+        pt.scale(esc, esc)
+        _desenhar_chapa(pt, chapa)
+        pt.restore()
+        y = 27 + MESA_H * esc + 6
+        f.setPixelSize(4.2)
+        pt.setFont(f)
+        for k, _p, dentro in sorted(chapa):
+            pt.drawText(QRectF(14, y, 180, 5.5), Qt.AlignLeft | Qt.AlignVCenter,
+                        f"{k}  {NOMES[k]}" + ("   — dentro de um vazado: corta antes dele (laranja)" if dentro else ""))
+            y += 5.5
+        y += 3
+        for cor, txt in (("#e0313b", "vermelho: contorno (por último)"), ("#2f6bff", "azul: vazados e rasgos"),
+                         ("#ff8c00", "laranja: peça dentro de vazado (corta antes)"),
+                         ("#222222", "preto: gravação")):
+            pt.setPen(QColor(cor))
+            pt.drawText(QRectF(14, y, 180, 5), Qt.AlignLeft | Qt.AlignVCenter, "■ " + txt)
+            y += 5
+        pt.restore()
+    pt.end()
+
+
+def previa(chapas, png):
+    """Imagem das chapas lado a lado (conferência)."""
+    esc, sep = 2.5, 20
+    img = QImage(int(len(chapas) * (MESA_W * esc + sep)), int(MESA_H * esc), QImage.Format_RGB32)
+    img.fill(Qt.white)
+    pt = QPainter(img)
+    pt.setRenderHint(QPainter.Antialiasing)
+    for i, chapa in enumerate(chapas):
+        pt.save()
+        pt.translate(i * (MESA_W * esc + sep), 0)
+        pt.scale(esc, esc)
+        _desenhar_chapa(pt, chapa)
+        pt.restore()
+    pt.end()
+    img.save(png)
+
+
+if __name__ == "__main__":
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    saida, ap, nomes, dentro, chapas = gerar(sys.argv[1], sys.argv[2])
+    if len(sys.argv) > 3:
+        previa(chapas, sys.argv[3])
+    if len(sys.argv) > 4:
+        mapa_pdf(chapas, ap, sys.argv[4])
+    print(saida, [f"{a:.0%}" for a in ap], nomes, "dentro:", dentro)
