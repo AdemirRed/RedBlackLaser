@@ -736,3 +736,12 @@ laser desligado.
   queimou o MDF num ponto na máquina real. Agora manda reset (0x18): apaga na hora; "Retomar interrompido" continua.
 - Pausar: "!" e, quando o status chega em Hold:0, 0x9E (parada do laser na pausa do GRBL 1.1); "~" religa.
 - Simulador corrigido: em M3 a pausa não apaga o laser (como o GRBL real); aceita 0x9E.
+
+## 0.53.0 — orçamento cobra por placa; laser e mão de obra não são custo
+- Preço por peça (padrão) = placas × R$ 8 + pintura: R$ 20 o projeto completo até 10 placas, + R$ 3 por placa acima
+  (valores editáveis em Configurações → "Preço por placa"). Preço digitado na mão continua valendo; preço por placa 0
+  volta para custo + margem.
+- Aba Orçamento: "Placas de MDF por peça" e "Projeto pintado" (salvos por modelo); sem pintura, a tinta sai do custo.
+- A composição (placas × R$ e pintura) aparece na tabela, no "Copiar para o cliente" e no PDF.
+- Custo = só o que sai do bolso (MDF, tinta, cola, insumos). Hora de laser e trabalho manual são ganho do dono: um corte
+  de 3 h não dá mais "prejuízo" (o orçamento da Carine marcava −R$ 80). Dica nova: quanto você ganha por hora.

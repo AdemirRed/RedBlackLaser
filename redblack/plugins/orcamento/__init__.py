@@ -5,8 +5,11 @@ Separação usada (para não confundir valor de referência com dinheiro que sai
     kit) + insumos + custo OPERACIONAL do laser (energia, manutenção, desgaste; R$/h real da máquina).
   • MÃO DE OBRA — tempo manual × sua hora.
   • REMUNERAÇÃO DA MÁQUINA — tempo de laser × (hora de laser cobrada − custo operacional/h).
-  • CUSTO PARA PREÇO = desembolso + mão de obra + remuneração da máquina.
-  • LUCRO = preço − custo para preço.  "Fica para você" = preço − desembolso (lucro + mão de obra + máquina).
+  • CUSTO = só o desembolso (o que sai do bolso). Hora de laser e trabalho manual são do próprio dono: entram no
+    PREÇO (o que ele cobra), nunca no custo — senão um corte longo dá "prejuízo" que não existe.
+  • PREÇO por placa (padrão): placas × R$ por placa + pintura (valor do projeto completo até N placas, + R$ por
+    placa acima disso). Preço informado na mão vence; preço por placa 0 = custo + margem.
+  • LUCRO = preço − desembolso (o que fica para você: paga o seu tempo de laser e o seu trabalho manual).
 Cada dado tem a marca "confirmado"; o resto aparece como ESTIMATIVA.
 """
 import math
@@ -46,11 +49,16 @@ CAMPOS = {
     "manual_min": ("Trabalho manual por peça (min)", 0.0, "dado"),
     "hora_manual": ("Sua hora de trabalho manual", 15.0, "decisao"),
     "fixos": ("Custos do pedido (frete, arte nova…)", 0.0, "dado"),
-    "margem_pct": ("Margem sobre o custo (%) se não houver preço", 50.0, "decisao"),
+    "preco_placa": ("Preço cobrado por placa de MDF (0 = usar a margem)", 8.0, "decisao"),
+    "pintura": ("Projeto pintado", 1, "decisao"),
+    "pintura_preco": ("Pintura do projeto completo (até o limite de placas)", 20.0, "decisao"),
+    "pintura_limite": ("Placas incluídas no valor da pintura", 10, "decisao"),
+    "pintura_extra": ("Pintura: a mais por placa acima do limite", 3.0, "decisao"),
+    "margem_pct": ("Margem sobre o custo (%) sem preço informado nem preço por placa", 50.0, "decisao"),
     "preco_manual": ("Preço de venda por peça (0 = usar a margem)", 0.0, "decisao"),
     "quantidade": ("Quantidade de peças", 1, "decisao"),
 }
-INTEIROS = ("placas_por_chapa", "camadas", "tinta_ml", "cola_pecas", "quantidade")
+INTEIROS = ("placas_por_chapa", "camadas", "tinta_ml", "cola_pecas", "quantidade", "pintura_limite")
 DESCONTOS = ((1, 0.0), (5, 5.0), (10, 10.0), (20, 15.0))  # quantidade mínima → desconto % (editável na janela)
 
 # Dados vindos do levantamento do usuário (APAGAR.txt, 13/11/2026). True = confirmado (compra/medida real).
@@ -71,7 +79,8 @@ def orcar(v):
     q = int(v["quantidade"])
     placa = float(v["chapa_preco"]) / int(v["placas_por_chapa"])
     mdf = placa * int(v["camadas"])
-    tinta = float(v["tinta_preco"]) / int(v["tinta_ml"]) * float(v["tinta_ml_peca"])
+    pintado = float(v["pintura"]) > 0
+    tinta = float(v["tinta_preco"]) / int(v["tinta_ml"]) * float(v["tinta_ml_peca"]) if pintado else 0.0
     cola = float(v["cola_preco"]) / int(v["cola_pecas"])
     insumos = float(v["insumos"])
     horas_laser = float(v["laser_min"]) / 60
@@ -81,10 +90,18 @@ def orcar(v):
     manual = float(v["manual_min"]) / 60 * float(v["hora_manual"])
     fixos_peca = float(v["fixos"]) / q
     desembolso = mdf + tinta + cola + insumos + oper + fixos_peca
-    custo = desembolso + manual + remun_maquina
-    preco = float(v["preco_manual"]) or custo * (1 + float(v["margem_pct"]) / 100)
+    custo = desembolso  # laser e mão de obra são o ganho do dono, não gasto
+    referencia = desembolso + manual + remun_maquina  # base da margem quando não há preço
+    placas = int(v["camadas"])
+    cobr_placas = placas * float(v["preco_placa"])
+    cobr_pintura = (float(v["pintura_preco"]) + float(v["pintura_extra"]) * max(0, placas - int(v["pintura_limite"]))
+                    if pintado else 0.0)
+    por_placa = not float(v["preco_manual"]) and float(v["preco_placa"]) > 0
+    preco = (float(v["preco_manual"]) or (cobr_placas + cobr_pintura if por_placa
+                                          else referencia * (1 + float(v["margem_pct"]) / 100)))
     lucro = preco - custo
-    r = {"placa": placa, "mdf": mdf, "tinta": tinta, "cola": cola, "insumos": insumos, "oper": oper,
+    r = {"placa": placa, "placas": placas, "cobr_placas": cobr_placas, "cobr_pintura": cobr_pintura,
+         "por_placa": por_placa, "pintado": pintado, "mdf": mdf, "tinta": tinta, "cola": cola, "insumos": insumos, "oper": oper,
          "fixos_peca": fixos_peca, "desembolso": desembolso, "manual": manual, "remun_maquina": remun_maquina,
          "maquina_total": maquina_total, "custo": custo, "preco": preco, "lucro": lucro,
          "fica_para_voce": preco - desembolso, "margem_real_pct": lucro / preco * 100 if preco else 0.0,
@@ -111,11 +128,15 @@ def dicas(r, v):
     """Ideias para aumentar a margem sem baixar a qualidade, a partir de onde o custo pesa mais."""
     out = []
     c = r["custo"] or 1
-    if r["remun_maquina"] / c > 0.4:
-        out.append(f"A hora de laser responde por {r['remun_maquina'] / c * 100:.0f} % do custo: menos minutos de "
+    p = r["preco"] or 1
+    horas = (float(v["laser_min"]) + float(v["manual_min"])) / 60
+    if horas > 0:
+        out.append(f"Você ganha {reais(r['lucro'] / horas)} por hora de trabalho seu (laser + manual) nesta peça.")
+    if r["remun_maquina"] / p > 0.6:
+        out.append(f"A hora de laser vale {r['remun_maquina'] / p * 100:.0f} % do preço: menos minutos de "
                    "corte = mais margem. Teste velocidade e passadas na matriz de materiais e corte as 3 camadas de "
                    "várias peças na mesma placa.")
-    if r["manual"] / c > 0.25:
+    if r["manual"] / p > 0.25:
         out.append("Trabalho manual pesa bastante: pinte a placa inteira ANTES de cortar (rolinho rende mais e "
                    "não marca), solte as sobras, lixe e cole em lote, use gabarito de colagem.")
     if float(v["tinta_ml_peca"]) >= 20:

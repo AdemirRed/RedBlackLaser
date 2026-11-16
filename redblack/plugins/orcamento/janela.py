@@ -20,14 +20,15 @@ from ... import percurso as pc
 from . import CAMPOS, CONFIRMADOS_INICIAIS, DESCONTOS, INTEIROS, MODELOS_INICIAIS, dicas, orcar, reais
 
 DINHEIRO = ("chapa_preco", "tinta_preco", "cola_preco", "insumos", "custo_oper_hora", "hora_maquina", "hora_manual",
-            "fixos", "preco_manual")
-GRUPOS_CFG = (("MDF", ("chapa_preco", "placas_por_chapa", "camadas")),
+            "fixos", "preco_manual", "preco_placa", "pintura_preco", "pintura_extra")
+GRUPOS_CFG = (("MDF", ("chapa_preco", "placas_por_chapa")),
+              ("Preço por placa (cobrança)", ("preco_placa", "pintura_preco", "pintura_limite", "pintura_extra")),
               ("Pintura e colagem", ("tinta_preco", "tinta_ml", "tinta_ml_peca", "cola_preco", "cola_pecas",
                                      "insumos")),
               ("Máquina", ("hora_maquina",)),
               ("Trabalho manual", ("hora_manual",)),
               ("Preço", ("margem_pct",)))
-POR_MODELO = ("laser_min", "manual_min", "preco_manual", "tinta_ml_peca", "insumos")
+POR_MODELO = ("laser_min", "manual_min", "preco_manual", "tinta_ml_peca", "insumos", "camadas", "pintura")
 PLANO = "📐 Plano aberto"  # produto = o projeto aberto agora: tempo de laser do plano, preço pela margem
 CHAVE = "orcamento_v3"
 EMPRESA_PADRAO = {"nome": "RedBlack", "slogan": "Corte e gravação a laser", "telefone": "", "instagram": "",
@@ -38,7 +39,23 @@ EMPRESA_PADRAO = {"nome": "RedBlack", "slogan": "Corte e gravação a laser", "t
 COR_ESCURA = "#141416"
 
 
+class _Marca(QCheckBox):
+    """Caixa de marcar com a mesma interface dos campos numéricos (value/setValue/valueChanged)."""
+
+    def value(self):
+        return 1 if self.isChecked() else 0
+
+    def setValue(self, x):
+        self.setChecked(bool(x))
+
+    @property
+    def valueChanged(self):
+        return self.toggled
+
+
 def _spin(chave):
+    if chave == "pintura":
+        return _Marca("Projeto pintado")
     if chave in INTEIROS:
         w = QSpinBox()
         w.setRange(1, 100000)
@@ -113,9 +130,10 @@ class JanelaOrcamento(QDialog):
         cab.addWidget(QLabel("Tempo de laser:"), 3, 0)
         cab.addWidget(self.origem, 3, 1, 1, 3)
         linha = 4
-        for k in ("laser_min", "manual_min", "quantidade", "preco_manual", "fixos"):
-            rot = {"laser_min": "Laser por peça (min):", "manual_min": "Trabalho manual por peça (min):",
-                   "quantidade": "Quantidade:", "preco_manual": "Preço por peça (0 = pela margem):",
+        for k in ("camadas", "pintura", "laser_min", "manual_min", "quantidade", "preco_manual", "fixos"):
+            rot = {"camadas": "Placas de MDF por peça:", "pintura": "Pintura:",
+                   "laser_min": "Laser por peça (min):", "manual_min": "Trabalho manual por peça (min):",
+                   "quantidade": "Quantidade:", "preco_manual": "Preço por peça (0 = por placa):",
                    "fixos": "Custos do pedido (frete, arte):"}[k]
             s = _spin(k)
             s.setValue(self.dados["valores"].get(k, CAMPOS[k][1]))
@@ -413,13 +431,17 @@ class JanelaOrcamento(QDialog):
             ("Cola", f"kit {reais(v['cola_preco'])} ÷ {int(v['cola_pecas'])} peças", r["cola"],
              st("cola_preco", "cola_pecas")),
             ("Outros insumos", "embalagem, fita, parafusos…", r["insumos"], st("insumos")),
-            ("Máquina (laser)", f"{v['laser_min']:.0f} min × {reais(v['hora_maquina'])}/h", r["remun_maquina"],
+            ("Seu laser (não é custo)", f"{v['laser_min']:.0f} min × {reais(v['hora_maquina'])}/h — você recebe", r["remun_maquina"],
              st("laser_min")),
-            ("Mão de obra", f"{v['manual_min']:g} min × {reais(v['hora_manual'])}/h", r["manual"], st("manual_min")),
-            ("= Custo total", "materiais + máquina + mão de obra", r["custo"], ""),
-            ("Preço de venda", ("preço informado" if v["preco_manual"] else f"custo + {v['margem_pct']:g} %")
+            ("Sua mão de obra (não é custo)", f"{v['manual_min']:g} min × {reais(v['hora_manual'])}/h — você recebe",
+             r["manual"], st("manual_min")),
+            ("= Custo (sai do bolso)", "MDF + tinta + cola + insumos", r["custo"], ""),
+            ("Placas cobradas", f"{r['placas']} placas × {reais(v['preco_placa'])}", r["cobr_placas"], ""),
+            ("Pintura cobrada", self.como_pintura(v, r), r["cobr_pintura"], ""),
+            ("Preço de venda", ("preço informado" if v["preco_manual"] else "placas + pintura" if r["por_placa"]
+                                else f"custo + {v['margem_pct']:g} %")
              + (f" − {r['desconto']:g} % (quantidade)" if r["desconto"] else ""), r["preco"], ""),
-            ("= Lucro estimado", f"margem real {r['margem_real_pct']:.0f} % do preço", r["lucro"], ""),
+            ("= Lucro estimado", f"preço − custo ({r['margem_real_pct']:.0f} % do preço): paga o seu tempo", r["lucro"], ""),
         ]
         self.tabela.setRowCount(len(linhas))
         for i, (item, como, valor, estado) in enumerate(linhas):
@@ -456,9 +478,9 @@ class JanelaOrcamento(QDialog):
         avisos = []
         if r["lucro"] < 0:
             avisos.append(f"<span style='color:#ff6b6b;font-weight:bold'>⚠ PREÇO ABAIXO DO CUSTO: falta "
-                          f"{reais(-r['lucro'])} por peça. O maior peso é a máquina "
-                          f"({v['laser_min']:.0f} min de laser = {reais(r['remun_maquina'])}): confira as velocidades "
-                          "e passadas das camadas do projeto (o tempo vem delas) ou o preço.</span>")
+                          f"{reais(-r['lucro'])} por peça para cobrir o material (MDF {reais(r['mdf'])}, tinta "
+                          f"{reais(r['tinta'])}, cola {reais(r['cola'])}): confira o preço por placa e a quantidade "
+                          "de placas.</span>")
         avisos += [f"<b>{self.modelo.currentText()}</b>: 1 chapa ({int(v['placas_por_chapa'])} placas) rende "
                   f"<b>{r['pecas_por_chapa']} peças completas</b> de {int(v['camadas'])} camadas"
                   + (f", sobram {r['sobra_placas']} placa(s)" if r["sobra_placas"] else "")
@@ -474,6 +496,24 @@ class JanelaOrcamento(QDialog):
         avisos += ["<b>Como aumentar a margem</b>"] + [f"• {x}" for x in dicas(r, v)]
         self.resultado.setText("<br>".join(avisos) + "<br><br>PREÇO DE VENDA e LUCRO ESTIMADO na tabela acima.")
 
+    @staticmethod
+    def como_pintura(v, r):
+        if not r["pintado"]:
+            return "sem pintura"
+        extra = max(0, r["placas"] - int(v["pintura_limite"]))
+        return (f"até {int(v['pintura_limite'])} placas {reais(v['pintura_preco'])}"
+                + (f" + {extra} × {reais(v['pintura_extra'])}" if extra else ""))
+
+    @staticmethod
+    def composicao(v, r):
+        """Texto do cliente: quanto das placas e da pintura compõe o preço (só quando o preço é por placa)."""
+        if not r["por_placa"]:
+            return ""
+        s = f"{r['placas']} placa(s) de MDF × {reais(v['preco_placa'])} = {reais(r['cobr_placas'])}"
+        if r["pintado"]:
+            s += f" + pintura {reais(r['cobr_pintura'])}"
+        return s + " por unidade"
+
     # ================================================================== saídas
     def texto_cliente(self):
         v, r = self.calculo()
@@ -482,6 +522,8 @@ class JanelaOrcamento(QDialog):
         if self.cliente.text().strip():
             linhas.append(f"Cliente: {self.cliente.text().strip()}")
         linhas.append(f"{r['q']} unidade(s): {reais(r['preco'])} cada — total {reais(r['preco_pedido'])}")
+        if self.composicao(v, r):
+            linhas.append(self.composicao(v, r))
         for qmin, desc in self.faixas():
             linhas.append(f"{'1 unidade' if qmin == 1 else f'A partir de {qmin} unidades'}: "
                           f"{reais(r['preco_base'] * (1 - desc / 100))} cada")
@@ -519,13 +561,14 @@ class JanelaOrcamento(QDialog):
             except Exception:  # sem peças/sem render: segue sem imagem
                 imagem = None
         desenhar_pdf(caminho, self.empresa(), {"nome": self.cliente.text().strip(), "contato": self.contato.text().strip()},
-                     produto, self.descricao.text().strip(), imagem, *self.calculo(), self.faixas())
+                     produto, self.descricao.text().strip(), imagem, *self.calculo(), self.faixas(),
+                     self.composicao(*self.calculo()))
         if not getattr(self, "silencioso", False):
             QMessageBox.information(self, "Orçamento", f"PDF salvo em:\n{caminho}")
         return caminho
 
 
-def desenhar_pdf(caminho, emp, cliente, produto, descricao, imagem, v, r, faixas):
+def desenhar_pdf(caminho, emp, cliente, produto, descricao, imagem, v, r, faixas, composicao=""):
     """Orçamento A4 para o cliente (sem custos internos): cabeçalho com logo/nome, número, data e validade; cliente;
     imagem do projeto; tabela do pedido; total em destaque; valores por quantidade; condições e pagamento; rodapé.
     Desenhado em pixels a 300 dpi (texto com espaçamento correto; o pintor NÃO é escalado)."""
@@ -634,6 +677,9 @@ def desenhar_pdf(caminho, emp, cliente, produto, descricao, imagem, v, r, faixas
     for (x, w, _t, al), s in zip(cols[1:], (str(r["q"]), reais(r["preco"]), reais(r["preco_pedido"]))):
         texto(x + 2.5, y, w - 5, 17, s, 11, QFont.Normal, escura, al | Qt.AlignVCenter)
     y += 17
+    if composicao:
+        texto(17.5, y, 175, 7, composicao + ".", 9, QFont.Normal, cinza)
+        y += 7
     if r.get("desconto"):
         texto(17.5, y, 150, 7, f"Inclui desconto de {r['desconto']:g} % por quantidade "
                                f"(de {reais(r['preco_base'])} por {reais(r['preco'])} cada).", 9, QFont.Normal, cinza)
