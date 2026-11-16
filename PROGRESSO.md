@@ -745,3 +745,12 @@ laser desligado.
 - A composição (placas × R$ e pintura) aparece na tabela, no "Copiar para o cliente" e no PDF.
 - Custo = só o que sai do bolso (MDF, tinta, cola, insumos). Hora de laser e trabalho manual são ganho do dono: um corte
   de 3 h não dá mais "prejuízo" (o orçamento da Carine marcava −R$ 80). Dica nova: quanto você ganha por hora.
+
+## 0.54.0 — solda macho e fêmea; barra lateral alinhada
+- Botões novos na barra lateral (e no menu Ferramentas), com dica animada:
+  - **Soldar macho**: junta as formas; o pedaço que passa da borda vira um dente para fora.
+  - **Soldar fêmea**: a forma MAIOR é a base (não importa a ordem do clique); as que encostam nela abrem o rasgo e
+    somem. As que não encostam ficam como estão.
+  (A "Solda" antiga só juntava: quem queria o rasgo do encaixe recebia o dente.)
+- Barra lateral: todos os botões do mesmo tamanho (os que têm menu ficavam mais largos e desalinhados) e o campo do
+  raio do bolear sem setas, na largura da barra (passava dela e alargava a barra).

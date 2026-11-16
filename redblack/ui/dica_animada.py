@@ -281,7 +281,42 @@ def demo_otimizar(p, t, W, H):
     p.drawText(QRectF(0, H - 22, W, 18), Qt.AlignCenter, "17 nós" if not limpo else "5 nós: corte mais liso")
 
 
-DEMOS = {"select": demo_select, "pan": demo_pan, "node": demo_node, "pen": demo_pen, "rect": demo_rect,
+def _demo_solda(p, t, W, H, femea):
+    """Placa + retângulo pequeno que desce até cruzar a borda; ao soldar vira dente (macho) ou rasgo (fêmea)."""
+    placa = QRectF(40, 70, 160, 60)
+    desce = _fase(t, 0.05, 0.35)
+    dente = QRectF(100, 20 + desce * 30, 40, 40)  # para em y = 50..90: 20 mm acima, 20 dentro da placa
+    if t < 0.5:
+        p.setPen(_caneta(AZUL))
+        p.drawRect(placa)
+        p.setPen(_caneta(VERMELHO))
+        p.drawRect(dente)
+        _cursor(p, dente.center().x() + 6, dente.center().y(), 0.05 < t < 0.35)
+        return
+    forma = QPainterPath()
+    forma.addRect(placa)
+    corte = QPainterPath()
+    corte.addRect(dente)
+    res = forma.subtracted(corte) if femea else forma.united(corte)
+    brilho = 1 - _fase(t, 0.5, 0.65)
+    p.setPen(_caneta(AMARELO if brilho > 0.3 else AZUL, 2.5))
+    p.drawPath(res.simplified())
+    if t > 0.6:
+        p.setPen(QColor("#ffffff"))
+        p.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        p.drawText(QRectF(0, H - 18, W, 16), Qt.AlignCenter,
+                   "rasgo para dentro (fêmea)" if femea else "dente para fora (macho)")
+
+
+def demo_solda_macho(p, t, W, H):
+    _demo_solda(p, t, W, H, False)
+
+
+def demo_solda_femea(p, t, W, H):
+    _demo_solda(p, t, W, H, True)
+
+
+DEMOS = {"solda_macho": demo_solda_macho, "solda_femea": demo_solda_femea, "select": demo_select, "pan": demo_pan, "node": demo_node, "pen": demo_pen, "rect": demo_rect,
          "ellipse": demo_ellipse, "polygon": demo_polygon, "star": demo_star, "text": demo_text,
          "measure": demo_measure, "trim": demo_trim, "bolear": demo_bolear, "juntar": demo_juntar,
          "fechar": demo_fechar, "duplicados": demo_duplicados, "inverter": demo_inverter, "otimizar": demo_otimizar}

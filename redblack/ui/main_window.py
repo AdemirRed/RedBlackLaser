@@ -13,7 +13,7 @@ from datetime import datetime
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QPainterPath, QTransform, QUndoCommand, QUndoStack
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog,
+    QAbstractItemView, QAbstractSpinBox, QApplication, QButtonGroup, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog,
     QFormLayout, QFrame, QGroupBox, QProgressBar, QInputDialog, QLineEdit, QListWidgetItem, QMenu, QPlainTextEdit,
     QGridLayout, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton, QScrollArea,
     QHeaderView, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QTreeWidget,
@@ -101,6 +101,12 @@ def _cruza(p, q) -> bool:
     st = QPainterPathStroker()
     st.setWidth(1e-3)
     return st.createStroke(p).intersects(st.createStroke(q))
+
+
+def _area_caminho(p) -> float:
+    """Área (mm²) do contorno externo: escolhe a peça maior na solda fêmea."""
+    return max((abs(sum(a.x() * b.y() - b.x() * a.y() for a, b in zip(q, list(q)[1:] + list(q)[:1]))) / 2
+                for q in p.toSubpathPolygons()), default=0.0)
 
 
 def svg_report(res) -> str:
@@ -2602,7 +2608,7 @@ class MainWindow(QMainWindow):
         sel = self._vetoriais(self._sel_ordem())
         minimo = 1 if tipo == "solda" else 2
         nomes = {"solda": "Solda", "uniao": "União", "subtrair": "Subtração", "intersecao": "Interseção",
-                 "cortar": "Corte"}
+                 "cortar": "Corte", "macho": "Solda macho", "femea": "Solda fêmea"}
         if len(sel) < minimo:
             self.statusBar().showMessage(f"{nomes[tipo]}: selecione {minimo} ou mais formas fechadas "
                                          "(imagens não entram).")
@@ -2613,13 +2619,23 @@ class MainWindow(QMainWindow):
                             "(Editar → Fechar caminho) ou desmarque as linhas abertas.")
             return False
         base = sel[0]
-        if tipo in ("solda", "uniao"):
+        if tipo == "femea":  # a maior é a base; as que encostam nela abrem o rasgo e somem
+            i_base = max(range(len(sel)), key=lambda i: abs(_area_caminho(paths[i])))
+            base = sel[i_base]
+            cortam = [i for i in range(len(sel)) if i != i_base and paths[i].intersects(paths[i_base])]
+            if not cortam:
+                self.statusBar().showMessage("Solda fêmea: as formas menores não encostam na maior — nada para "
+                                             "recortar.")
+                return False
+            res = [(bo.subtrair(paths[i_base], [paths[i] for i in cortam]), base.name, base.layer)]
+            remover = [base] + [sel[i] for i in cortam]
+        elif tipo in ("solda", "uniao", "macho"):
             # Peça inteira dentro de outra (texto, furo, gravação em cima da placa) não entra na união: ficaria
             # engolida. Só se juntam as que se sobrepõem de verdade.
             dentro = {i for i, p in enumerate(paths) for j, q in enumerate(paths)
                       if i != j and q.contains(p) and not _cruza(p, q)}
             juntar = [i for i in range(len(sel)) if i not in dentro]
-            if len(juntar) < minimo or (tipo == "uniao" and len(juntar) < 2):
+            if len(juntar) < minimo or (tipo in ("uniao", "macho") and len(juntar) < 2):
                 self.statusBar().showMessage(f"{nomes[tipo]}: as outras peças estão inteiras dentro da maior e "
                                              "ficam como estão — nada para juntar.")
                 return False
@@ -2642,7 +2658,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"{nomes[tipo]}: o resultado ficou vazio (as formas não se sobrepõem?).")
             return False
         self._trocar_por_caminhos(remover, res, nomes[tipo])
-        ficaram = len(sel) - len(remover) if tipo in ("solda", "uniao") else 0
+        ficaram = len(sel) - len(remover) if tipo in ("solda", "uniao", "macho", "femea") else 0
         self.statusBar().showMessage(f"{nomes[tipo]}: {len(res)} forma(s) resultante(s)."
                                      + (f" {ficaram} peça(s) de dentro ficaram como estavam." if ficaram else ""))
         return True
@@ -3812,6 +3828,14 @@ class MainWindow(QMainWindow):
                 "Mantém só a área comum às formas selecionadas",
                 "A última forma clicada corta as outras como um cortador de biscoito (ela continua)")):
             a.setToolTip(dica)
+        self.act_macho = self._act("Soldar &macho (dente para fora)", "weld_male", slot=lambda: self.booleana("macho"))
+        self.act_macho.setToolTip("Soldar macho — junte a peça com um retângulo que passa da borda: o pedaço de fora "
+                                  "vira um dente (encaixe macho). Selecione 2 ou mais formas fechadas.")
+        self.act_femea = self._act("Soldar &fêmea (rasgo para dentro)", "weld_female",
+                                   slot=lambda: self.booleana("femea"))
+        self.act_femea.setToolTip("Soldar fêmea — o retângulo menor abre um rasgo na peça maior (encaixe fêmea) e "
+                                  "some. A maior é sempre a base, não importa a ordem do clique.")
+        self.acts_bool += [self.act_macho, self.act_femea]
         self.act_rename = self._act("Re&nomear objeto…", shortcut="F2", slot=self.rename_selected)
         self.act_duplicate = self._act("D&uplicar", shortcut="Ctrl+D", slot=self.duplicate)
         self.act_duplicate.setToolTip("Duplicar no mesmo lugar (Ctrl+D); as cópias ficam selecionadas para mover")
@@ -3989,6 +4013,7 @@ class MainWindow(QMainWindow):
         acoes_demo = dict(self.tools)
         acoes_demo["pan"] = self.tools["pan"]
         acoes_demo.update(self.acoes_contorno)
+        acoes_demo.update(solda_macho=self.act_macho, solda_femea=self.act_femea)
         instalar_dicas(self.barra_ferramentas, acoes_demo, lambda: ler_pref(self.settings, "dicas_animadas"))
         instalar_dicas(self.barra_principal, {"pan": self.tools["pan"]}, lambda: ler_pref(self.settings, "dicas_animadas"))
         self._agrupar_barras()
@@ -4055,7 +4080,7 @@ class MainWindow(QMainWindow):
             main.addSeparator() if a is None else main.addAction(a)
         ferr = self.barra_ferramentas
         ferr.addSeparator()
-        for a in [*self.acts_bool[:5], None, self.act_grade, self.act_circular, self.act_copiar_caminho]:
+        for a in [*self.acts_bool[:5], self.act_macho, self.act_femea, None, self.act_grade, self.act_circular, self.act_copiar_caminho]:
             ferr.addSeparator() if a is None else ferr.addAction(a)
 
     # ---------- barras ----------
@@ -4490,6 +4515,24 @@ class MainWindow(QMainWindow):
         lado = 18 if alt < 800 else 20 if alt < 1000 else 22
         for tb in self.toolbars:
             tb.setIconSize(QSize(lado, lado))
+        self._alinhar_barra_lateral(lado)
+
+    def _alinhar_barra_lateral(self, lado):
+        """Barra lateral em coluna: todos os botões do mesmo tamanho (os com setinha de menu ficavam mais largos e
+        encostados à esquerda) e o campo do raio do bolear na mesma largura (passava da barra)."""
+        tb = getattr(self, "barra_ferramentas", None)
+        if tb is None:
+            return
+        larg, alt = lado + 18, lado + 12
+        for bt in tb.findChildren(QToolButton):
+            if bt.parent() is tb and bt.objectName() != "qt_toolbar_ext_button":
+                bt.setFixedSize(larg, alt)
+        r = getattr(self, "raio_bolear", None)
+        if r is not None:
+            r.setButtonSymbols(QAbstractSpinBox.NoButtons)  # roda do mouse e setas do teclado ainda mudam o valor
+            r.setSuffix("")
+            r.setAlignment(Qt.AlignCenter)
+            r.setFixedWidth(larg)
 
     def _reorganizar_menu(self, m):
         """O menu Organizar tinha ~55 itens numa lista só: agrupa em submenus por assunto."""

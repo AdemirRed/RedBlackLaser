@@ -76,6 +76,33 @@ class JanelaTest(unittest.TestCase):
         r = ob.geom_rect(solda)
         self.assertEqual((r.left(), r.right()), (100, 230))  # placa + pega numa forma só
 
+    def test_solda_macho_e_femea(self):
+        # dente 10 mm de largura que passa 5 mm acima da borda de cima da placa e entra 5 mm nela
+        placa = self.add("Placa", fm.rect_path(QRectF(100, 100, 100, 50)))
+        dente = self.add("Dente", fm.rect_path(QRectF(140, 95, 10, 10)))
+        dente.setSelected(True)
+        placa.setSelected(True)  # clicado depois: a maior continua sendo a base
+        self.assertTrue(self.w.booleana("femea"))
+        (s,) = self.view.shapes()
+        self.assertEqual(s.name, "Placa")
+        caminho = s.sceneTransform().map(s.path())
+        self.assertEqual(ob.geom_rect(s).top(), 100)  # nada para fora
+        self.assertFalse(caminho.contains(QPointF(145, 102)))  # rasgo aberto
+        self.assertTrue(caminho.contains(QPointF(145, 107)))
+        self.w.undo_stack.undo()
+        for x in self.view.shapes():
+            x.setSelected(True)
+        self.assertTrue(self.w.booleana("macho"))
+        (s,) = self.view.shapes()
+        self.assertEqual(ob.geom_rect(s).top(), 95)  # dente para fora
+        self.assertTrue(s.sceneTransform().map(s.path()).contains(QPointF(145, 97)))
+        self.view.scene().clearSelection()
+        self.add("Longe", fm.rect_path(QRectF(0, 0, 10, 10)))
+        for x in self.view.shapes():
+            x.setSelected(True)
+        self.assertFalse(self.w.booleana("femea"))  # não encosta: avisa e não mexe
+        self.assertEqual(len(self.view.shapes()), 2)
+
     def test_ciclo_pelo_clique(self):
         placa = self.add("Placa", fm.rect_path(QRectF(100, 100, 120, 40)))
         self.view.ajustar_a(QRectF(80, 80, 160, 80))
