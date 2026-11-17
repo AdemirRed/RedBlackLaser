@@ -72,7 +72,7 @@ class PresepioTest(unittest.TestCase):
         zonas = pr.zonas_de_cor(pecas)  # partes de outra cor: tronco da palmeira, rostos, capas...
         self.assertLessEqual({c for z in zonas.values() for c, _n, _a in z}, set(pr.TINTAS))
         self.assertIn(("Marrom", "tronco"), [(c, n) for c, n, _a in zonas["P08"]])
-        self.assertIn(("Rosa", "rosto"), [(c, n) for c, n, _a in zonas["P04"]])
+        self.assertIn(("Sem tinta", "rosto"), [(c, n) for c, n, _a in zonas["P04"]])  # pele clara (sem tinta)
         n_zonas = sum(len(z) for z in zonas.values())
         self.assertEqual(sum(len(p["objetos"]) for p in d["paginas"][3:]),
                          sum(len(c) for c in chapas) + n_zonas)  # marcação = contornos + limites das cores

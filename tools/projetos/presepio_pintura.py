@@ -20,7 +20,7 @@ LARG = W - 2 * M
 TINTAS, COR = pr.TINTAS, pr.BASE_COR  # cor principal de cada peça; as zonas de outra cor vêm de pr.ZONAS
 POR_QUE = {"B01": "grama", "F01": "madeira da casa", "F02": "madeira da casa", "L01": "madeira da casa",
            "L02": "madeira da casa", "T01": "telhas", "T02": "telhas", "P01": "manto", "P02": "palha",
-           "P03": "manto", "P04": "manto", "P05": "túnica", "P06": "túnica", "P07": "a lã fica na cor da madeira",
+           "P03": "manto", "P04": "manto", "P05": "manto", "P06": "manto", "P07": "a lã fica na cor da madeira",
            "P08": "folhas", "G01": "peça de teste", "G02": "peça de teste"}
 
 
@@ -28,7 +28,7 @@ def receita(k, zonas):
     """Texto: cor principal + as partes de outra cor (sem repetir)."""
     partes = []
     for cor, nome, _a in zonas.get(k, ()):
-        t = f"{nome} {cor.lower()}"
+        t = f"{nome} {'sem tinta (pele clara)' if nome in ('rosto', 'mãos', 'cabeça', 'braço') else cor.lower()}"
         if t not in partes:
             partes.append(t)
     return f"{COR[k].lower()} ({POR_QUE[k]})" + ("; " + ", ".join(partes) if partes else "")
