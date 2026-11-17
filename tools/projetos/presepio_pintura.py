@@ -161,7 +161,7 @@ def pagina_regras(pg, chapas, zonas):
     pg.forma(q, QTransform(), cor=VERM, fundo="#fdf0f0", larg=0.4)
     pg.texto(M + 4, y + 3, LARG - 8, "Atenção", 10, True, VERM)
     pg.texto(M + 4, y + 9, LARG - 8, "• Tinta grossa engrossa o MDF e os encaixes ficam apertados: só 1 demão fina.\n"
-             "• Faça antes um teste num retalho: pinte, deixe secar e grave a 25 %. Se a gravação sumir na tinta, "
+             "• Faça antes um teste num retalho: pinte, deixe secar e grave a 35 % e 2000 mm/min (como o projeto). Se a gravação sumir na tinta, "
              "suba a potência da gravação aos poucos.\n"
              "• As bordas cortadas ficam na cor da madeira (o laser corta depois da tinta).", 8)
 

@@ -32,6 +32,7 @@ from redblack import projeto as pj  # noqa: E402
 PAGINAS = (13, 14, 15)          # páginas 14–16 do PDF (0 = primeira): as chapas de corte 1:1
 MESA_W, MESA_H = 365.0, 370.0   # área da mesa (X × Y)
 MARGEM, VAO = 2.0, 2.0          # da borda da chapa e entre peças (mm), pedido do dono
+GRAV_VEL, GRAV_POT = 2000.0, 35.0  # gravação das figuras, telhado e números: funda e bem visível
 RES = 2.0                       # px por mm no encaixe por grade
 
 NOMES = {"B01": "Base", "F01": "Fachada com estrela", "F02": "Fundo vazado", "L01": "Lateral esquerda",
@@ -174,7 +175,49 @@ def limpar(pecas):
         v["cont"] = cont
     if "P03" in pecas:
         pecas["P03"]["partes"].append((rosto_jose(), "cheio"))
+    for k, v in pecas.items():  # figuras: corta SÓ por fora (pedido do dono depois de cortar a ovelha)
+        if k.startswith("P"):
+            nova = silhueta(v)
+            v["partes"] = [(nova if t == "cont" else p, t) for p, t in v["partes"] if t != "furo"]
+            v["cont"] = nova
     return pecas
+
+
+FECHA_VAO = 2.5  # mm (raio): vãos de até ~5 mm entre partes da figura viram peça cheia
+RODAPE = 5.5     # mm de baixo das figuras (rodapé + lingueta de 3 mm) que não mudam
+REFAZER = ("P07",)  # peças com aba própria para cortar de novo num retalho
+
+
+def silhueta(v, folga=0.6):
+    """Contorno de corte = a borda de FORA da figura: o contorno do PDF unido ao desenho gravado (com `folga` mm em
+    volta) e sem nenhum buraco. Na ovelha o contorno do PDF entrava pelos vãos da lã e o laser cortava a lã fora,
+    sobrando só as linhas. O rodapé e a lingueta continuam exatos (são do contorno original)."""
+    from scipy.ndimage import binary_dilation, binary_fill_holes
+    from skimage.measure import approximate_polygon, find_contours
+    res = 10.0  # px/mm (a união exata de caminhos levava ~50 s por figura)
+    caixa = v["cont"].boundingRect().adjusted(-2 * folga, -2 * folga, 2 * folga, 2 * folga)
+    gravado = _raster([p for p, t in v["partes"] if t == "cheio"], caixa, res=res)
+    m = _raster([v["cont"]], caixa, res=res)[:gravado.shape[0], :gravado.shape[1]]
+    m |= binary_dilation(gravado, _disco(int(round(folga * res))))
+    # fecha vãos estreitos (lã da ovelha sem borda, entre o cajado e o corpo...): peça inteira, nada de "dedos"
+    from scipy.ndimage import binary_closing
+    m = binary_closing(np.pad(m, 30), _disco(int(round(FECHA_VAO * res))))[30:-30, 30:-30] | m
+    m = binary_fill_holes(m)
+    # rodapé + lingueta (5,5 mm de baixo) ficam EXATAMENTE como no projeto: canto arredondado não entra no rasgo
+    corte = int((v["cont"].boundingRect().bottom() - RODAPE - caixa.top()) * res)
+    m[max(corte, 0):, :] = False
+    linha = max(find_contours(np.pad(m, 1).astype(float), 0.5), key=len)  # a borda de fora
+    pts = [QPointF(caixa.left() + (x - 1) / res, caixa.top() + (y - 1) / res)
+           for y, x in approximate_polygon(linha, 0.4)]
+    fora = QPainterPath()
+    fora.addPolygon(pts)
+    fora.closeSubpath()
+    # unido ao contorno original: rodapé e lingueta exatos; os vãos de dentro já foram preenchidos
+    polys = fora.united(v["cont"]).simplified().toSubpathPolygons()
+    out = QPainterPath()
+    out.addPolygon(max(polys, key=lambda q: abs(_area_pts(list(q)))))
+    out.closeSubpath()
+    return out
 
 
 def _traco(pontos, larg):
@@ -336,14 +379,14 @@ def camadas():
     out = []
     for lid, nome, tipo in CAMADAS:
         c = cm.Camada(lid, nome)
-        if tipo == "grav_fig":  # gravação fraca some abaixo de 25 % a 3000 mm/min nesta máquina
-            c = cm.alterar(c, modo="preenchimento", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0,
+        if tipo == "grav_fig":  # mais lenta e forte que os 25 % a 3000 (o dono achou rasa e pouco visível, e vai por cima da tinta)
+            c = cm.alterar(c, modo="preenchimento", velocidade_mm_min=GRAV_VEL, potencia_max=GRAV_POT, potencia_min=0.0,
                            passadas=1, intervalo_mm=0.1)
         elif tipo == "marca":  # risco rápido, não corta: só mostra o contorno para pintar no lugar certo
             c = cm.alterar(c, modo="linha", velocidade_mm_min=8000.0, potencia_max=80.0, potencia_min=0.0,
                            passadas=1, air=False)
         elif tipo == "grav_linha":
-            c = cm.alterar(c, modo="linha", velocidade_mm_min=3000.0, potencia_max=25.0, potencia_min=0.0, passadas=1)
+            c = cm.alterar(c, modo="linha", velocidade_mm_min=GRAV_VEL, potencia_max=GRAV_POT, potencia_min=0.0, passadas=1)
         else:
             c = cm.alterar(c, **corte)
         out.append(c)
@@ -389,8 +432,8 @@ def gerar(pdf, saida):
              f"Peças dentro dos vazados de outras (sobra que vira peça): {', '.join(dentro) or 'nenhuma'}. "
              "Elas cortam ANTES do vazado (camadas C05 e C06): o miolo solto não arrasta a peça.\n"
              "C09 (códigos das peças) está com a Saída DESLIGADA: as peças saem sem marcação.\n"
-             "Ordem: C03 figuras (preenchida 3000 mm/min, 25 %) → C04 telhado, estrela e "
-             "folhas (traço 3000 mm/min, 25 %) → C07 números do gabarito → C05/C06 peças dentro de vazados → C02 "
+             "Ordem: C03 figuras (preenchida 2000 mm/min, 35 %) → C04 telhado, estrela e "
+             "folhas (traço 2000 mm/min, 35 %) → C07 números do gabarito → C05/C06 peças dentro de vazados → C02 "
              "vazados e rasgos → C01 contornos. Cortes 650 mm/min, 85 %, 2 passadas.\n"
              "Corte primeiro G01 + G02 (gabarito de folgas 2,80–3,20) e confira o encaixe antes das chapas. "
              "Montagem: siga o guia do PDF (as peças e os códigos são os mesmos).")
@@ -406,8 +449,23 @@ def gerar(pdf, saida):
     notas += ("\nPINTAR ANTES: rode a aba \"MARCA p/ pintar — chapa N\" (contornos e limites entre as cores, 8000 mm/min, 80 %; veja o GUIA DE PINTURA), tire a "
               "chapa, pinte dentro das marcas, encoste a chapa de volta EXATAMENTE no mesmo lugar (no batente/esquadro "
               "da mesa, sem mexer na origem) e rode a aba \"Chapa N\" para gravar e cortar.")
+    # peças para REFAZER sozinhas num retalho (a ovelha saiu quebrada com o corte por dentro do PDF), em pé, no canto
+    sozinhas, marcas_sozinhas = [], []
+    for k in REFAZER:
+        c = pecas[k]["cont"].boundingRect()
+        # canto de baixo à esquerda = origem da máquina: o retalho vai encostado no batente da origem
+        tf = QTransform.fromTranslate(MARGEM - c.left(), MESA_H - MARGEM - c.height() - c.top())
+        g = ob.group([ob.Shape(tf.map(p), f"{k} — {DESC[t]}", TIPO_CAMADA[t], cm.cor(TIPO_CAMADA[t]))
+                      for p, t in pecas[k]["partes"]])
+        g.name = f"{k} {NOMES[k]}"
+        sozinhas.append((g.snapshot(),))
+        marcas_sozinhas.append(tuple([ob.Shape(tf.map(pecas[k]["cont"]), f"Marca {k}", MARCA, cm.cor(MARCA)).snapshot()]
+                                     + [ob.Shape(tf.map(a), f"Marca {k} {n}", MARCA, cm.cor(MARCA)).snapshot()
+                                        for _c, n, a in zonas.get(k, ())]))
+        nomes += [f"Refazer {NOMES[k].lower()} (retalho)", f"MARCA p/ pintar — {NOMES[k].lower()}"]
+    extras = [x for par in zip(sozinhas, marcas_sozinhas) for x in par]
     pj.save(saida, snaps[0], camadas(), notas=notas,
-            paginas=[None] + [(s, (), ()) for s in snaps[1:] + marcas], pagina_atual=0, nomes_paginas=nomes)
+            paginas=[None] + [(s, (), ()) for s in snaps[1:] + marcas + extras], pagina_atual=0, nomes_paginas=nomes)
     import etiquetas
     etiquetas.etiquetar(saida, saida)
     _letras_25(saida)

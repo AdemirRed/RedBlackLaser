@@ -27,12 +27,20 @@ class PresepioTest(unittest.TestCase):
         self.assertEqual(len(pecas), 17)
         for k, (w, h) in TABELA.items():
             r = pecas[k]["cont"].boundingRect()
-            self.assertAlmostEqual(r.width(), w, delta=0.2, msg=k)
-            self.assertAlmostEqual(r.height(), h, delta=0.2, msg=k)
+            tol = 1.5 if k.startswith("P") else 0.2  # figuras: borda de fora a 0,6 mm do desenho (silhueta)
+            self.assertAlmostEqual(r.width(), w, delta=tol, msg=k)
+            self.assertAlmostEqual(r.height(), h, delta=tol, msg=k)
         jose = pecas["P03"]["partes"]  # rosto desenhado (o PDF não tem) e sem o furinho de 0,7 mm na boca
         self.assertEqual(sum(t == "cheio" for _p, t in jose), 2)
         self.assertTrue(all(max(p.boundingRect().width(), p.boundingRect().height()) >= 1 for p, t in jose
                             if t == "furo"))
+        for k in [k for k in pecas if k.startswith("P")]:  # figuras: só o corte de fora, inteiro
+            self.assertFalse([t for _p, t in pecas[k]["partes"] if t == "furo"], k)
+            self.assertEqual(len(pecas[k]["cont"].toSubpathPolygons()), 1, k)
+        self.assertGreater(pr._area(pecas["P07"]["cont"]), 1300)  # a lã inteira (o PDF cortava por dentro: ~968)
+        lingueta = [q for q in pecas["P07"]["cont"].toSubpathPolygons()[0]
+                    if q.y() > pecas["P07"]["cont"].boundingRect().bottom() - 0.01]
+        self.assertAlmostEqual(max(p.x() for p in lingueta) - min(p.x() for p in lingueta), 16.0, delta=0.05)
         for p, t in pecas["T01"]["partes"]:  # textura do telhado não passa do contorno
             if t == "linha":
                 self.assertTrue(pecas["T01"]["cont"].boundingRect().contains(p.boundingRect()))
@@ -56,9 +64,12 @@ class PresepioTest(unittest.TestCase):
         self.assertFalse(next(c for c in d["camadas"] if c["id"] == "C09")["saida"])  # peças sem marcação
         self.assertFalse(any(n.startswith("SÓ LETRAS") for n in d["nomes_paginas"]))
         # abas MARCA: só os contornos, nas mesmas posições da chapa de corte, camada 8000 mm/min a 80 %
+        grav = next(c for c in d["camadas"] if c["id"] == pr.GRAV_FIG)  # gravação funda e visível
+        self.assertEqual((grav["velocidade_mm_min"], grav["potencia_max"]), (2000, 35))
         marca = next(c for c in d["camadas"] if c["id"] == pr.MARCA)
         self.assertEqual((marca["velocidade_mm_min"], marca["potencia_max"], marca["passadas"]), (8000, 80, 1))
-        self.assertEqual(d["nomes_paginas"][3:], [f"MARCA p/ pintar — chapa {i}" for i in (1, 2, 3)])
+        self.assertEqual(d["nomes_paginas"][3:6], [f"MARCA p/ pintar — chapa {i}" for i in (1, 2, 3)])
+        self.assertEqual(d["nomes_paginas"][6:], ["Refazer ovelha (retalho)", "MARCA p/ pintar — ovelha"])
         for i, chapa in enumerate(chapas):
             contornos = sorted((round(p.boundingRect().x(), 3), round(p.boundingRect().y(), 3))
                                for _k, partes, _d in chapa for p, _l, t in partes if t == "cont")
@@ -74,7 +85,7 @@ class PresepioTest(unittest.TestCase):
         self.assertIn(("Marrom", "tronco"), [(c, n) for c, n, _a in zonas["P08"]])
         self.assertIn(("Sem tinta", "rosto"), [(c, n) for c, n, _a in zonas["P04"]])  # pele clara (sem tinta)
         n_zonas = sum(len(z) for z in zonas.values())
-        self.assertEqual(sum(len(p["objetos"]) for p in d["paginas"][3:]),
+        self.assertEqual(sum(len(p["objetos"]) for p in d["paginas"][3:6]),
                          sum(len(c) for c in chapas) + n_zonas)  # marcação = contornos + limites das cores
         guia = pp.gerar(PDF, os.path.join(tempfile.mkdtemp(), "pintura.pdf"))
         with open(guia, "rb") as f:

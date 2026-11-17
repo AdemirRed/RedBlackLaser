@@ -271,8 +271,8 @@ def pagina_problemas(pg, pc):
             ("Peça não soltou da chapa", "Não puxe: corte o ponto preso com estilete. Na próxima, confira o foco e "
              "a potência (corte 650 mm/min, 85 %, 2 passadas)."),
             ("Fumaça marcou a madeira", "Lixe de leve ou passe um pano úmido com álcool antes de montar."),
-            ("Gravação das figuras fraca", "Aumente a potência da camada de gravação aos poucos (comece em 25 % a "
-             "3000 mm/min) e teste num retalho."),
+            ("Gravação das figuras fraca", "Aumente a potência da camada de gravação aos poucos (o projeto usa 35 % a "
+             "2000 mm/min; nunca passe de 85 %) e teste num retalho."),
             ("Telhado não assenta", "Confira se a fachada e o fundo desceram até o fim nas laterais: se ficaram "
              "altos, as linguetas do telhado não alinham.")):
         y = caixa(pg, y, titulo, txt, VERM if "não" in titulo.lower() else VERDE)
