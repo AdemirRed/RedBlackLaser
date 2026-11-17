@@ -18,6 +18,7 @@ from . import grbl
 from .transporte import TransporteErro
 
 import re
+import threading
 from collections import deque
 
 PERMITIDOS = ("$I", "$$", "$G")
@@ -46,7 +47,9 @@ class Conexao:
         self.erro = ""
         self.info = grbl.MaquinaInfo()
         self.status = None
-        self.log = []          # (sentido, texto): "→" enviado, "←" recebido, "•" evento
+        self.log = []          # (sentido, texto): "→" enviado, "←" recebido, "•" evento (só os últimos 500)
+        self.n_log = 0         # quantas entradas já houve (a interface mostra as novas mesmo depois do corte)
+        self.trava = threading.RLock()  # a serial lê numa thread própria: estado mexido por uma de cada vez
         self.reinicios = 0
         self._fila = []        # consultas a enviar
         self._atual = None     # consulta aguardando "ok"
@@ -140,7 +143,7 @@ class Conexao:
     def parar_jog(self):
         if self.controle and self.estado == CONECTADO:
             self.tr.escrever(bytes([0x85]))
-            self.log.append(("→", "[cancelar jog]"))
+            self._registrar("→", "[cancelar jog]")
 
     def desbloquear(self):
         self._linha_controle("$X")
@@ -199,7 +202,7 @@ class Conexao:
     def pausar(self):
         if self.estado == CONECTADO:
             self.tr.escrever(b"!")
-            self.log.append(("→", "[pausar]"))
+            self._registrar("→", "[pausar]")
             self._apagar_na_pausa = True  # 0x9E quando parar (Hold:0): em M3 a pausa sozinha deixa o laser aceso
             if self.trabalho == TRABALHO_RODANDO:
                 self.trabalho = TRABALHO_PAUSADO
@@ -207,7 +210,7 @@ class Conexao:
     def retomar(self):
         self._exigir_controle(com_trabalho_livre=False)
         self.tr.escrever(b"~")
-        self.log.append(("→", "[retomar]"))
+        self._registrar("→", "[retomar]")
         self._apagar_na_pausa = False
         if self.trabalho == TRABALHO_PAUSADO:
             self.trabalho = TRABALHO_RODANDO
@@ -220,7 +223,7 @@ class Conexao:
             self.tr.escrever(bytes([0x18]))
         except TransporteErro:
             pass
-        self.log.append(("→", "[PARAR — reset]"))
+        self._registrar("→", "[PARAR — reset]")
         # Reset durante movimento deixa o GRBL em ALARME (ALARM:3) e tudo fica travado. Foi o usuário que parou e a
         # máquina não tem homing: assim que ela voltar em alarme, desbloqueia sozinho ($X) para poder mover de novo.
         self._desbloquear_apos_parar = self.controle
@@ -321,7 +324,7 @@ class Conexao:
             # RESET, não pausa: em M3 (corte) o GRBL pausado (!) deixa o laser ACESO parado, queimando no mesmo
             # ponto. O reset apaga na hora; o trabalho pode ser retomado depois ("Retomar interrompido").
             self.tr.escrever(bytes([0x18]))
-            self.log.append(("→", "[PARAR — reset por erro]"))
+            self._registrar("→", "[PARAR — reset por erro]")
             self._desbloquear_apos_parar = self.controle
             self.trabalho = TRABALHO_ERRO
             self._evento(f"Trabalho interrompido: {linha} na linha {n} ({self._job[n - 1][:40]}). Laser apagado "
@@ -336,6 +339,14 @@ class Conexao:
         self._fila.append(cmd)
 
     # ---------- ciclo ----------
+    def chegou(self, linha):
+        """Linha recebida na THREAD de leitura da serial: trata e já manda a próxima linha do trabalho, sem esperar a
+        interface (é o que evita a máquina parar no meio do trabalho quando a tela está ocupada)."""
+        with self.trava:
+            self._receber(grbl.limpar(linha))
+            if self.estado == CONECTADO and self.trabalho in (TRABALHO_RODANDO, TRABALHO_PAUSADO):
+                self._alimentar_trabalho()
+
     def tick(self, dt: float):
         if self.estado in (DESCONECTADO, FALHA):
             return
@@ -386,7 +397,8 @@ class Conexao:
     def _receber(self, linha):
         if not linha:
             return
-        self.log.append(("←", linha))
+        if not (linha == "ok" and self.trabalho in (TRABALHO_RODANDO, TRABALHO_PAUSADO)):
+            self._registrar("←", linha)  # os milhares de "ok" do trabalho não entram (pesavam na tela)
         bv = grbl.boas_vindas(linha)
         if bv:
             if self.estado == CONECTADO:
@@ -405,7 +417,7 @@ class Conexao:
             if getattr(self, "_apagar_na_pausa", False) and st.estado == "Hold:0":
                 self._apagar_na_pausa = False
                 self.tr.escrever(bytes([0x9E]))  # GRBL 1.1: apaga o laser na pausa; o "~" religa ao retomar
-                self.log.append(("→", "[apagar laser na pausa]"))
+                self._registrar("→", "[apagar laser na pausa]")
             if "A" in st.campos or "Ov" in st.campos:  # o GRBL só manda "A:" junto do "Ov:", e só se algo ligou
                 self.ar_maquina = "F" in st.campos.get("A", "")
             if self._desbloquear_apos_parar and self.estado == CONECTADO:
@@ -470,7 +482,7 @@ class Conexao:
         if cmd not in PERMITIDOS and not (self.controle and _CONTROLE.match(cmd)):  # defesa em profundidade
             raise ComandoProibido(cmd)
         self.tr.escrever((cmd + "\n").encode("ascii"))
-        self.log.append(("→", cmd))
+        self._registrar("→", cmd)
         self._atual, self._t = cmd, 0.0
 
     def _tempo_real(self, c):
@@ -479,8 +491,13 @@ class Conexao:
         self.tr.escrever(b"?")
 
     def _evento(self, texto):
-        self.log.append(("•", texto))
-        del self.log[:-500]  # mantém só o fim do registro
+        self._registrar("•", texto)
+
+    def _registrar(self, sentido, texto):
+        self.log.append((sentido, texto))
+        self.n_log += 1
+        if len(self.log) > 600:
+            del self.log[:-500]  # mantém só o fim do registro
 
     def _falha(self, msg):
         self.erro = msg
@@ -491,3 +508,18 @@ class Conexao:
             self.tr.fechar()
         except TransporteErro:
             pass
+
+
+def _com_trava(f):
+    def g(self, *a, **k):
+        with self.trava:
+            return f(self, *a, **k)
+    g.__name__, g.__doc__ = f.__name__, f.__doc__
+    return g
+
+
+# Tudo o que a interface chama (conectar, mover, enviar, pausar, parar, tick...) passa pela mesma trava que a thread
+# da serial usa em chegou(): uma de cada vez, sem estado pela metade.
+for _nome, _f in list(vars(Conexao).items()):
+    if callable(_f) and not _nome.startswith("_") and _nome not in ("chegou", "linhas_do_gcode"):
+        setattr(Conexao, _nome, _com_trava(_f))

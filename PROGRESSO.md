@@ -766,3 +766,13 @@ laser desligado.
   mão de obra R$ 3/h. Com eles: quadro da Carine (3 placas, 2 h 56 min de laser, 2 h manual) = R$ 60,00;
   Tyfani = R$ 36,87; Valentina = R$ 35,75 (os dois sem preço fixo: passam a seguir a regra).
 - A 0.54.1 cobrava R$ 8/placa + R$ 20 de pintura + R$ 30–50/h: o quadro saía por R$ 160–205.
+
+## 0.55.0 — fim das travadas no meio do trabalho (envio em thread própria, como o LaserGRBL)
+- Comparado com o LaserGRBL 7.14 instalado: ele envia e lê a serial em threads próprias; o RedBlack fazia tudo na
+  thread da tela. Com a mesa redesenhando (mira a 60 quadros/s em FullViewportUpdate, 9–13 ms por quadro só com o
+  presépio aberto = interface 56–80 % ocupada) o "ok" do GRBL esperava, o buffer de 127 bytes esvaziava e a máquina
+  parava no meio da linha — marca/furinho na peça.
+- Serial agora com pyserial e uma thread de leitura: cada "ok" chega em Conexao.chegou() (com trava) e a próxima
+  linha sai na hora, mesmo com a tela ocupada. Teste: 400 linhas enviadas com a "tela" parada.
+- A mira redesenha só o quadradinho dela (0,5 ms em vez de 11 ms).
+- Os milhares de "ok" do trabalho não entram mais no registro; registro com contador (não perde as linhas novas).

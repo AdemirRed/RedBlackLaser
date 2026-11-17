@@ -1,6 +1,7 @@
 """Etapa 13: conexão e identificação sem executar trabalho nem emitir laser (validado no simulador)."""
 import os
 import sys
+import time
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -168,73 +169,142 @@ class ConexaoTest(unittest.TestCase):
 
     def test_registro_limitado(self):
         _, _, c = conectar()
+        antes = c.n_log
         for i in range(2000):
             c._evento(f"e{i}")
-        self.assertLessEqual(len(c.log), 500)
-
-
-class _Codigo:
-    """Erro do QSerialPort pelo nome (sem importar QtSerialPort: os outros testes conferem que ela só carrega ao conectar)."""
-
-    def __init__(self, name):
-        self.name = name
+        self.assertLessEqual(len(c.log), 600)  # corta para 500 quando passa de 600
+        self.assertEqual(c.n_log - antes, 2000)  # a interface conta pelo total (mostra as novas mesmo depois do corte)
+        self.assertEqual(c.log[-1][1], "e1999")
 
 
 class PortaFalsa:
-    """Imita QSerialPort para testar o transporte serial sem tocar em portas reais."""
+    """Imita serial.Serial (pyserial) para testar o transporte sem tocar em portas reais."""
 
     def __init__(self):
-        self.aberta, self.entrada, self.saida = False, b"", b""
+        self.is_open, self.entrada, self.saida, self.quebrar = False, b"", b"", False
 
-    def isOpen(self): return self.aberta
-    def open(self, mode): self.aberta = True; return True
-    def close(self): self.aberta = False
+    def open(self): self.is_open = True
+    def close(self): self.is_open = False
     def write(self, data): self.saida += bytes(data); return len(data)
-    def flush(self): return True
-    def readAll(self): d, self.entrada = self.entrada, b""; return d
-    def waitForReadyRead(self, ms): return bool(self.entrada)
-    def errorString(self): return "Recurso indisponível"
+
+    @property
+    def in_waiting(self): return len(self.entrada)
+
+    def read(self, n):
+        if self.quebrar:
+            raise OSError("O dispositivo não reconhece o comando")  # cabo removido
+        if not self.entrada:
+            time.sleep(0.005)
+            return b""
+        d, self.entrada = self.entrada[:n], self.entrada[n:]
+        return d
+
+
+def esperar(cond, s=2.0):
+    fim = time.monotonic() + s
+    while time.monotonic() < fim and not cond():
+        time.sleep(0.005)
+    return cond()
 
 
 class TransporteSerialTest(unittest.TestCase):
     def test_linhas_partidas_crlf_e_lixo(self):
         p = PortaFalsa()
-        tr = TransporteSerial("COM9", porta_qt=p)
+        tr = TransporteSerial("COM9", porta_serial=p)
         tr.abrir()
-        p.entrada = b"Grbl 1.1h ['$' for "
-        self.assertEqual(tr.ler_linhas(), [])
-        p.entrada = b"help]\r\nok\r\n<Idle|MPos:0,0,0"
-        self.assertEqual(tr.ler_linhas(), ["Grbl 1.1h ['$' for help]", "ok"])
-        p.entrada = b"|FS:0,0>\r\n"
-        self.assertEqual(tr.ler_linhas(), ["<Idle|MPos:0,0,0|FS:0,0>"])
-        p.entrada = b"\xff" * 70000                     # velocidade errada: lixo sem quebra de linha
-        self.assertEqual(tr.ler_linhas(), [])
-        self.assertLessEqual(len(tr._buf), 4096)
-        tr.escrever(b"$I\n")
-        self.assertEqual(p.saida, b"$I\n")
+        try:
+            tr.entrada(b"Grbl 1.1h ['$' for ")
+            self.assertEqual(tr.ler_linhas(), [])
+            tr.entrada(b"help]\r\nok\r\n<Idle|MPos:0,0,0")
+            self.assertEqual(tr.ler_linhas(), ["Grbl 1.1h ['$' for help]", "ok"])
+            tr.entrada(b"|FS:0,0>\r\n")
+            self.assertEqual(tr.ler_linhas(), ["<Idle|MPos:0,0,0|FS:0,0>"])
+            tr.entrada(b"\xff" * 70000)                     # velocidade errada: lixo sem quebra de linha
+            self.assertEqual(tr.ler_linhas(), [])
+            self.assertLessEqual(len(tr._buf), 4096)
+            tr.escrever(b"$I\n")
+            self.assertEqual(p.saida, b"$I\n")
+        finally:
+            tr.fechar()
 
-    def test_tempo_esgotado_nao_derruba_a_conexao(self):
-        """Espera de 0 s sem dados gera TimeoutError (12) no QSerialPort: não é perda de conexão."""
+    def test_thread_entrega_cada_linha_na_hora(self):
+        """O "ok" chega pela thread da serial e vai direto para quem trata (como o LaserGRBL), sem esperar a tela."""
         p = PortaFalsa()
-        p.clearError = lambda: None
-        tr = TransporteSerial("COM4", porta_qt=p)
+        tr = TransporteSerial("COM4", porta_serial=p)
+        recebidas = []
+        tr.ao_linha = recebidas.append
         tr.abrir()
-        tr._erro(_Codigo("TimeoutError"))
-        self.assertTrue(tr.aberto)
-        tr.esperar(0.1)
-        p.entrada = b"Grbl 1.1h ['$' for help]\r\n"
-        self.assertEqual(tr.ler_linhas(), ["Grbl 1.1h ['$' for help]"])
+        try:
+            p.entrada = b"ok\r\nok\r\nerror:20\r\n"
+            self.assertTrue(esperar(lambda: len(recebidas) == 3))
+            self.assertEqual(recebidas, ["ok", "ok", "error:20"])
+            self.assertEqual(tr.ler_linhas(), [])  # já foram entregues
+        finally:
+            tr.fechar()
 
     def test_cabo_removido(self):
         p = PortaFalsa()
-        tr = TransporteSerial("COM9", porta_qt=p)
+        tr = TransporteSerial("COM9", porta_serial=p)
         tr.abrir()
-        tr._erro(_Codigo("ResourceError"))
-        self.assertFalse(tr.aberto)
+        p.quebrar = True
+        self.assertTrue(esperar(lambda: not tr.aberto))
         with self.assertRaises(TransporteErro):
             tr.escrever(b"?")
         with self.assertRaises(TransporteErro):
             tr.ler_linhas()
+        tr.fechar()
+
+    def test_porta_que_nao_abre(self):
+        class NaoAbre(PortaFalsa):
+            def open(self):
+                raise OSError("could not open port 'COM99': Acesso negado")
+        with self.assertRaises(TransporteErro):
+            TransporteSerial("COM99", porta_serial=NaoAbre()).abrir()
+
+
+class GrblFalso(PortaFalsa):
+    """Responde "ok" a cada linha recebida (como o GRBL quando o planejador aceita a linha)."""
+
+    def write(self, data):
+        super().write(data)
+        self.entrada += b"ok\r\n" * bytes(data).count(b"\n")
+        return len(data)
+
+
+class TelaOcupadaTest(unittest.TestCase):
+    def test_trabalho_continua_com_a_tela_parada(self):
+        """O bug das travadas: com a interface ocupada (mesa redesenhando), o "ok" esperava e a máquina parava. Com a
+        thread da serial, o trabalho inteiro vai sem a interface chamar tick() nenhuma vez."""
+        p = GrblFalso()
+        tr = TransporteSerial("COM4", porta_serial=p)
+        c = cx.Conexao(tr)
+        tr.ao_linha = c.chegou
+        tr.abrir()
+        try:
+            c.estado, c.controle = cx.CONECTADO, True
+            linhas = [f"G1 X{k % 50}.25 Y{k % 7}.5 S100 F3000" for k in range(400)]
+            c.iniciar_trabalho("\n".join(linhas) + "\n")
+            c._alimentar_trabalho()  # o 1º lote sai pela interface; o resto, só pela thread
+            time.sleep(0.5)  # "tela ocupada": ninguém chama tick()
+            self.assertTrue(esperar(lambda: c.trabalho_ok == 400, 3.0), c.trabalho_ok)
+            self.assertEqual(p.saida.count(b"\n"), 400)
+        finally:
+            tr.fechar()
+
+
+class ChegouTest(unittest.TestCase):
+    def test_ok_da_thread_manda_a_proxima_linha_e_nao_enche_o_registro(self):
+        _sim, tr, c = conectar()
+        c.habilitar_controle(True)
+        linhas = [f"G1 X{k % 50} Y{k % 7} S100 F3000" for k in range(200)]
+        c.iniciar_trabalho("\n".join(linhas) + "\n")
+        c._alimentar_trabalho()
+        enviadas = len(tr.escrito)
+        no_registro = c.n_log
+        for _ in range(3):
+            c.chegou("ok")  # como a thread da serial faria
+        self.assertGreater(len(tr.escrito), enviadas)  # mandou mais linhas na hora
+        self.assertEqual(c.n_log, no_registro)  # "ok" do trabalho não vai para o registro
 
 
 if __name__ == "__main__":

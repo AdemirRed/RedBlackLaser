@@ -7,7 +7,7 @@ $versao = (python -c "import redblack; print(redblack.__version__)").Trim()
 
 python -m PyInstaller --noconfirm --clean --windowed --name RedBlackLaser `
     --icon redblack\ui\app.ico --version-file instalador\versao.txt `
-    --add-data "redblack\ui\app.ico;redblack\ui" --hidden-import pypdf `
+    --add-data "redblack\ui\app.ico;redblack\ui" --hidden-import pypdf --hidden-import serial --hidden-import serial.win32 `
     --hidden-import redblack.plugins.plano_corte --hidden-import redblack.plugins.plano_corte.janela `
     --hidden-import redblack.plugins.colorir_metal --hidden-import redblack.plugins.colorir_metal.janela `
     --hidden-import redblack.plugins.cilindros --hidden-import redblack.plugins.cilindros.janela `

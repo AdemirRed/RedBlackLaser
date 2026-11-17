@@ -6,7 +6,7 @@ exibição (origem inferior esquerda) via redblack.geometria.
 import math
 
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QTransform
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QRegion, QTransform
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsView, QGridLayout, QLineEdit, QWidget
 from shiboken6 import isValid
 
@@ -1480,8 +1480,9 @@ class BedView(QGraphicsView):
         if ponto is None or self.cabecote is None:
             self._cab_anim = None
             if ponto != self.cabecote or laser != self.cabecote_laser:
+                antes = self.cabecote
                 self.cabecote, self.cabecote_laser = ponto, laser
-                self.viewport().update()
+                self._repintar_mira(antes, ponto)
             self._cab_t = agora
             return
         if ponto == getattr(self, "_cab_alvo", None) and laser == self.cabecote_laser:
@@ -1508,11 +1509,23 @@ class BedView(QGraphicsView):
             return
         a, b, t0, dur = self._cab_anim
         f = min(1.0, (time.monotonic() - t0) / dur)
+        antes = self.cabecote
         self.cabecote = a + (b - a) * f
         if f >= 1.0:
             self._cab_anim = None
             self._cab_timer.stop()
-        self.viewport().update()
+        self._repintar_mira(antes, self.cabecote)
+
+    def _repintar_mira(self, *pontos):
+        """Redesenha só o quadradinho da mira (antes e depois). A mesa inteira a 60 quadros/s ocupava a interface e
+        atrasava o envio das linhas para a máquina (ela parava no meio do trabalho)."""
+        lado = 24  # px: a cruz vai a 18 px do centro, mais a espessura da caneta
+        reg = QRegion()
+        for c in pontos:
+            if c is not None:
+                q = self.mapFromScene(c)
+                reg += QRegion(q.x() - lado, q.y() - lado, 2 * lado, 2 * lado)
+        self.viewport().update(reg)
 
     def destacar(self, caminho):
         self.destaque = caminho
