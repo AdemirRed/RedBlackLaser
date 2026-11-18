@@ -171,7 +171,7 @@ def camadas():
         if lid == REBAIXO:  # gravação funda (não atravessa): o assento de cada aplicação na frente
             c = cm.alterar(cm.Camada(lid, "Rebaixo dos encaixes (gravado, 1º) — teste a profundidade num retalho"),
                            modo="preenchimento", velocidade_mm_min=1500.0, potencia_max=60.0, potencia_min=0.0,
-                           passadas=2, intervalo_mm=0.1)
+                           passadas=1, intervalo_mm=0.1)  # 1 passada basta (dono, 18/11/2026)
         else:
             c = cm.alterar(c, **corte)
         out.append(c)
@@ -199,7 +199,7 @@ def gerar(pdf, saida, png=None):
              "Contornos do nome, ramos, flores e frente SUAVIZADOS (o PDF era traçado de imagem, com degraus).\n"
              "REBAIXO (C03, gravado, 1º): o assento de cada aplicação na frente, com o MESMO contorno da peça, na "
              "posição do PDF — sem folga. Só onde há MDF (não grava a janela) e não atravessa. Profundidade: teste "
-             "C03 num retalho (1500 mm/min, 60 %, 2 passadas) e ajuste velocidade/passadas.\n"
+             "C03 num retalho (1500 mm/min, 60 %, 1 passada) e ajuste velocidade/passadas.\n"
              "Cores: Luana amarelo; ramos R01–R04 verde; flores F01/F02 rosa; frente branca.\n"
              "Ordem: C03 rebaixo → C05/C06 peças dentro de vazados → C02 janela e vazados → C01 contornos (630/85/2 "
              "conforme o material).\nMontagem: espaçadores P02–P04 atrás da frente (canal de cima livre para a foto), "
