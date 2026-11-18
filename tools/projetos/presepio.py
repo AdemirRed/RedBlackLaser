@@ -497,11 +497,12 @@ def _desenhar_chapa(pt, chapa, rotulos=True):
     pt.fillRect(QRectF(MARGEM, MARGEM, MESA_W - 2 * MARGEM, MESA_H - 2 * MARGEM), QColor("#f3e3c3"))
     for k, partes, _d in chapa:
         for p, lid, t in partes:
-            if t in ("cheio", "num"):
+            cor = cores.get(lid, "#7aa7e8")  # outras camadas (ex.: rebaixo) em azul claro
+            if t in ("cheio", "num", "rebaixo"):
                 pt.setPen(Qt.NoPen)
-                pt.setBrush(QColor(cores[lid]))
+                pt.setBrush(QColor(cor))
             else:
-                pt.setPen(QPen(QColor(cores[lid]), 0.4))
+                pt.setPen(QPen(QColor(cor), 0.4))
                 pt.setBrush(Qt.NoBrush)
             pt.drawPath(p)
     if rotulos:
