@@ -6,6 +6,8 @@ janela, e **não envia nada à máquina** (o G-code é só gravado em arquivo).
 
 Sem dependências extras: usa o próprio RedBlack (Python + PySide6 + pypdf). Protocolo MCP por stdio.
 
+**Antes de criar projetos, leia [COMO_CRIAR_PROJETOS.md](COMO_CRIAR_PROJETOS.md)** (parâmetros do dono e erros a evitar).
+
 ## Ferramentas
 | Ferramenta | O que faz |
 |---|---|
