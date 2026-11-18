@@ -62,13 +62,52 @@ def _folga(area, mm):
     return area.united(st.createStroke(area))
 
 
+SIGMA_PECA, SIGMA_FORTE = 0.7, 1.2  # mm de alisamento extra (aplicações / corações, flor e miolo)
+
+
+def _coracao(r, n=240):
+    """Coração clássico (x = 16 sen³t, y = 13 cos t − 5 cos 2t − 2 cos 3t − cos 4t) ocupando a caixa `r`."""
+    import math
+    pts = [(16 * math.sin(t) ** 3, -(13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)))
+           for t in (2 * math.pi * i / n for i in range(n))]
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    c = QPainterPath()
+    c.addPolygon([QPointF(r.left() + (x - x0) / (x1 - x0) * r.width(), r.top() + (y - y0) / (y1 - y0) * r.height())
+                  for x, y in pts])
+    c.closeSubpath()
+    return c
+
+
+def _oval(r):
+    c = QPainterPath()
+    c.addEllipse(r)
+    return c
+
+
+def _fora_e_furos(p):
+    """Maior contorno de fora + os furos dentro dele (pedacinhos soltos que sobram do recorte são descartados)."""
+    polys = [q for q in p.toSubpathPolygons() if len(q) > 2 and abs(pr._area_pts(list(q))) > 1.0]
+    polys.sort(key=lambda q: -abs(pr._area_pts(list(q))))
+
+    def caminho_de(q):
+        c = QPainterPath()
+        c.addPolygon(q)
+        c.closeSubpath()
+        return c
+    fora = caminho_de(polys[0])
+    furos = [caminho_de(q) for q in polys[1:] if fora.contains(q.boundingRect().center())
+             and min(q.boundingRect().width(), q.boundingRect().height()) >= 1.0]
+    return fora, furos
+
+
 def ler(pdf):
     doc = pymupdf.open(pdf)
     p1, p14 = doc[0].get_drawings(), doc[13].get_drawings()
     doc.close()
     # base 1:1 (pág. 14): o traço escuro tem o contorno de fora e a janela
     base = lu.suavizar(caminho({**next(d for d in p14 if d["type"] == "s" and len(d["items"]) > 100),
-                                "closePath": True}), 0.25)
+                                "closePath": True}), 0.5)
     fora, *resto = lu._subcaminhos(base)
     janela = max(resto, key=pr._area)
     # desenho montado (pág. 1) -> 1:1 pela moldura
@@ -77,7 +116,7 @@ def ler(pdf):
     e = m14.width() / (m1.width * PT)
     tf = (QTransform.fromTranslate(-m1.x0 * PT, -m1.y0 * PT) * QTransform.fromScale(e, e)
           * QTransform.fromTranslate(m14.left(), m14.top()))
-    apl, detalhes, laterais = {}, [], []
+    apl, detalhes, laterais, pele = {}, [], [], []
     for d in p1:
         if d["type"] == "fs" and len(d["items"]) > 20:
             p = lu.suavizar(tf.map(caminho({**d, "closePath": True})), 0.3)
@@ -91,6 +130,8 @@ def ler(pdf):
             else:
                 assert k not in apl, k
                 apl[k] = (cont, furos)
+        elif d["type"] == "f" and tuple(round(v, 2) for v in d["fill"]) == (0.94, 0.82, 0.64):
+            pele.append(tf.map(caminho({**d, "closePath": True})))  # rosto, pescoço e braços (ficam na base)
         elif d["type"] == "f" and tuple(round(v, 2) for v in d["fill"]) == (0.27, 0.16, 0.06):
             g = tf.map(caminho({**d, "closePath": True}))
             if g.boundingRect().width() * g.boundingRect().height() > 0.05:
@@ -98,6 +139,22 @@ def ler(pdf):
     for k, (_y, cont, furos) in zip(LATERAIS, sorted(laterais, key=lambda t: t[0])):
         apl[k] = (cont, furos)
     assert set(apl) == set(TAMANHOS), set(TAMANHOS) - set(apl)
+    # linhas suaves: o desenho da pág. 1 foi ampliado 1,8× e o tremido junto — alisa mais (corações, flor: bem mais)
+    perfeitos = ("H01", "H02", "H03", "H04", "H05", "M01")
+    for k, (cont, furos) in list(apl.items()):
+        if k in perfeitos:  # forma perfeita (coração/oval) na mesma caixa do PDF — o traçado tinha calombos
+            r = cont.boundingRect()
+            apl[k] = ((_oval(r) if k == "M01" else _coracao(r)), [])
+            continue
+        sig = SIGMA_FORTE if k == "F01" else SIGMA_PECA
+        apl[k] = (lu.suavizar(cont, sig), [lu.suavizar(f, sig) for f in furos])
+    # cabelo: no PDF ele continua por baixo do vestido, dos ombros e da coroa (desenhados por cima). Fica só o que
+    # aparece: cabelo − vestido − coroa − pele.
+    cab = _area_util(*apl["C01"])
+    for tira in [apl["D01"][0], apl["K01"][0]] + pele:
+        cab = cab.subtracted(tira)
+    cont, furos = _fora_e_furos(cab.simplified())
+    apl["C01"] = (cont, furos)
     pecas = {}
     solido = QPainterPath(fora).subtracted(janela)
     rebaixo_base = QPainterPath()
