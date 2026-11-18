@@ -89,7 +89,7 @@ def ler(pdf):
     return pecas
 
 
-def gerar(pdf, saida, mapa=None, png=None):
+def _gerar(pdf, saida, mapa=None, png=None):
     pecas = ler(pdf)
     pr.NOMES.update(NOMES)  # o mapa e a prévia do presépio usam o nome pelo código
     pos = pr.encaixar(pecas, n_chapas=5)
@@ -128,6 +128,16 @@ def gerar(pdf, saida, mapa=None, png=None):
     if png:
         pr.previa(chapas, png)
     return saida, ap, [sorted(k for k, *_ in c) for c in chapas], dentro
+
+
+def gerar(pdf, saida, mapa=None, png=None):
+    """Gera o projeto; os nomes das peças do presépio (usados no mapa e na prévia) voltam como estavam."""
+    salvo = dict(pr.NOMES)
+    try:
+        return _gerar(pdf, saida, mapa, png)
+    finally:
+        pr.NOMES.clear()
+        pr.NOMES.update(salvo)
 
 
 if __name__ == "__main__":

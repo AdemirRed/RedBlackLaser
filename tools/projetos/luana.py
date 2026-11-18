@@ -178,7 +178,7 @@ def camadas():
     return out
 
 
-def gerar(pdf, saida, png=None):
+def _gerar(pdf, saida, png=None):
     pecas, _orig = ler(pdf)
     pr.NOMES.update(NOMES)
     pos = pr.encaixar(pecas, n_chapas=3)
@@ -209,6 +209,16 @@ def gerar(pdf, saida, png=None):
     if png:
         pr.previa(chapas, png)
     return saida, ap, [sorted(k for k, *_ in c) for c in chapas]
+
+
+def gerar(pdf, saida, png=None):
+    """Gera o projeto; os nomes das peças do presépio (usados no mapa e na prévia) voltam como estavam."""
+    salvo = dict(pr.NOMES)
+    try:
+        return _gerar(pdf, saida, png)
+    finally:
+        pr.NOMES.clear()
+        pr.NOMES.update(salvo)
 
 
 if __name__ == "__main__":
