@@ -25,6 +25,8 @@ _PATHS = {
     "dist_v": '<path d="M3 3h18M3 21h18"/><rect x="7" y="9" width="10" height="6"/>',
     "offset": '<rect x="8" y="8" width="8" height="8"/><rect x="3" y="3" width="18" height="18" rx="4"/>',
     "weld": '<path d="M3 9h6V3h12v12h-6v6H3z"/>',
+    "tela_corte": '<rect x="2" y="4" width="20" height="13" rx="1"/><path d="M8 21h8M12 17v4"/>'
+                  '<path d="M7 13l3-5 2 3 2-2 3 4" stroke-dasharray="2 1"/><circle cx="17" cy="13" r="1.5"/>',
     "weld_male": '<path d="M3 11h6V5h6v6h6v9H3z"/><path d="M9 11h6" stroke-dasharray="2 2"/>',
     "weld_female": '<path d="M3 5h6v6h6V5h6v15H3z"/><path d="M9 5h6" stroke-dasharray="2 2"/>',
     "union": '<rect x="3" y="3" width="12" height="12"/><rect x="9" y="9" width="12" height="12"/>',

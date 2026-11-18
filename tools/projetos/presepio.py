@@ -107,6 +107,7 @@ def ler(pdf):
             for q, _ in info["partes"]:
                 caixa = caixa.united(q.boundingRect())
             pecas[info["codigo"]] = {"partes": info["partes"], "caixa": caixa}
+    doc.close()  # aberto e esquecido várias vezes estourava o limite de arquivos abertos (testes)
     return pecas
 
 

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import CREDITOS, DIREITOS, __version__
+from .. import tempo_trabalho as tt
 from .. import aparar as apr
 from .. import booleanas as bo
 from .. import disposicao as dsp
@@ -158,7 +159,18 @@ class MainWindow(QMainWindow):
         self.canvas = Canvas()
         self.paginas, self.pagina_atual = [None], 0  # páginas guardadas (None = a aberta, que está na mesa)
         self.nomes_paginas = pj.nomes_padrao(1)
-        self.setCentralWidget(self._area_com_paginas())
+        from PySide6.QtWidgets import QStackedWidget
+        from .tela_corte import TelaCorte
+        self.pilha_central = QStackedWidget()  # 0 = edição (como sempre), 1 = tela de corte (F9)
+        self.pilha_central.addWidget(self._area_com_paginas())
+        self.tela_corte = TelaCorte(self.canvas.scene)
+        self.pilha_central.addWidget(self.tela_corte)
+        self.setCentralWidget(self.pilha_central)
+        tc = self.tela_corte
+        tc.btn_pausar.clicked.connect(lambda: self._pausar_retomar())
+        tc.btn_parar.clicked.connect(lambda: self._parar_maquina())
+        tc.btn_ar.clicked.connect(lambda on: self.btn_ar.setChecked(on))
+        tc.btn_voltar.clicked.connect(lambda: self.act_tela_corte.setChecked(False))
         self._sel_actions, self._clipboard, self._tree_map, self._syncing = [], [], {}, False
         self.layers = []  # Camada, na ordem de saída
         self.vars = vr.DadosVariaveis()  # planilha, linha atual e contador do texto variável
@@ -4074,6 +4086,12 @@ class MainWindow(QMainWindow):
         main.insertAction(A["zoom_in"], self.tools["pan"])
         main.insertAction(A["zoom_out"], A["zoom_sel"])  # ordem: mover vista, aproximar, ajustar seleção, afastar
         main.addAction(self.act_maquina)
+        self.act_tela_corte = self._act("Tela de corte", "tela_corte", shortcut="F9")
+        self.act_tela_corte.setCheckable(True)
+        self.act_tela_corte.setToolTip("Tela de corte (F9): só para acompanhar o trabalho — tempo decorrido e "
+                                       "restante, Pausar e PARAR grandes. F9 de novo volta para a edição.")
+        self.act_tela_corte.toggled.connect(self._modo_corte)
+        main.addAction(self.act_tela_corte)
         main.addSeparator()
         for a in [self.act_group, self.act_ungroup, None, *alinhar_dist_esp[8:], self.act_espelho_linha, None,
                   act_centros, *alinhar_dist_esp[:8]]:
@@ -6172,7 +6190,86 @@ class MainWindow(QMainWindow):
         ok = self._comando_maquina(lambda c: c.iniciar_trabalho(texto), "Trabalho enviado à máquina.")
         if ok:
             self._gravar_trabalho(c._job, 0)
+            if ler_pref(self.settings, "tela_corte_auto"):
+                self.act_tela_corte.setChecked(True)
         return ok
+
+    def _modo_corte(self, on):
+        """Troca entre a edição (igual a sempre) e a tela de corte. Os painéis e barras voltam como estavam."""
+        if on == (self.pilha_central.currentIndex() == 1):
+            return
+        if on:
+            self._estado_edicao = self.saveState()
+            for d in self.docks:
+                d.hide()
+            for tb in self.toolbars:
+                if tb is not self.barra_principal:
+                    tb.hide()
+            self.pilha_central.setCurrentIndex(1)
+            self.tela_corte.vista.mostrar_mesa(QRectF(0, 0, g.BED_W, g.BED_H))
+        else:
+            self.pilha_central.setCurrentIndex(0)
+            if getattr(self, "_estado_edicao", None) is not None:
+                self.restoreState(self._estado_edicao)
+        self.act_tela_corte.blockSignals(True)
+        self.act_tela_corte.setChecked(on)
+        self.act_tela_corte.blockSignals(False)
+
+    def _trabalho_para_cena(self):
+        """Coordenadas do trabalho (G-code / posição da máquina) -> mesa da tela (a mesma conta da mira)."""
+        W, H = gc.area(gc.PERFIL)
+        mapa = getattr(self, "_mapa_cabecote", None)
+
+        def f(x, y):
+            p = mapa((x, y)) if mapa is not None else (x, y)
+            return QPointF(*gc.doc_para_maquina(p[0], p[1], W, H))
+        return f
+
+    def _tempo_do_trabalho(self, c):
+        """Tempo decorrido, restante (corrigido pelo tempo real) e a camada de agora; atualiza a tela de corte."""
+        import time
+        job = c._job
+        if job and job is not getattr(self, "_job_visto", None):  # trabalho novo (Iniciar, Retomar, faixa...)
+            self._job_visto = job
+            self._prev = tt.Previsao(tt.estimar(job, c.info.valor(110, 6000.0) or 6000.0))
+            cam = tt.camadas(getattr(c, "texto_trabalho", "") or "")
+            self._camadas_job = cam if len(cam) == len(job) else []
+            self._t0, self._pausado, self._pausa_ini, self._fim = time.monotonic(), 0.0, None, None
+            self._trechos, self._trilha_i = tt.trechos_com_laser(job), 0
+            self.tela_corte.vista.limpar_trilha()
+        prev = getattr(self, "_prev", None)
+        rodando = c.trabalho in (cx.TRABALHO_RODANDO, cx.TRABALHO_PAUSADO)
+        if prev is None or not (rodando or self._fim is not None or c.trabalho in (cx.TRABALHO_FIM, cx.TRABALHO_ERRO)):
+            self.tela_corte.mostrar("Nenhum trabalho")
+            return None
+        agora = time.monotonic()
+        if c.trabalho == cx.TRABALHO_PAUSADO and self._pausa_ini is None:
+            self._pausa_ini = agora
+        elif c.trabalho != cx.TRABALHO_PAUSADO and self._pausa_ini is not None:
+            self._pausado += agora - self._pausa_ini
+            self._pausa_ini = None
+        if not rodando and self._fim is None:
+            self._fim = agora - self._t0 - self._pausado  # congela o tempo no fim
+        decorrido = self._fim if self._fim is not None else agora - self._t0 - self._pausado - (
+            agora - self._pausa_ini if self._pausa_ini is not None else 0.0)
+        feita = max(0, c.trabalho_ok - 15)  # "ok" = entrou no planejador do GRBL (~15 linhas à frente)
+        if c.trabalho == cx.TRABALHO_FIM:
+            feita = len(self._trechos)
+        if feita > self._trilha_i:  # o que já foi feito com laser fica verde (do G-code: sem retas falsas)
+            para_cena = self._trabalho_para_cena()
+            self.tela_corte.vista.adicionar_trilha([(para_cena(*t[0]), para_cena(*t[1]))
+                                                    for t in self._trechos[self._trilha_i:feita] if t])
+            self._trilha_i = feita
+        restante = prev.restante(feita, decorrido)[0] if rodando else 0.0
+        # a camada de agora (o cabeçalho não tem: pega a próxima que aparece)
+        cam = next((x for x in self._camadas_job[feita:feita + 500] if x), "") if rodando else ""
+        nomes = {cx.TRABALHO_RODANDO: "Gravando / cortando…", cx.TRABALHO_PAUSADO: "PAUSADO",
+                 cx.TRABALHO_FIM: "✔ Concluído", cx.TRABALHO_ERRO: "⏹ Parado / interrompido"}
+        self.tela_corte.mostrar(nomes.get(c.trabalho, c.trabalho), decorrido, restante if rodando else None,
+                                c.progresso if rodando else (1.0 if c.trabalho == cx.TRABALHO_FIM else 0.0),
+                                f"Agora: {cam}" if cam else "",
+                                f"{c.trabalho_ok} de {len(job)} linhas" if rodando else "")
+        return restante if rodando else None
 
     # ---------- retomar depois de queda de luz / começar no meio ----------
     def _pasta_trabalho(self):
@@ -6458,6 +6555,7 @@ class MainWindow(QMainWindow):
             dx, dy = gc.doc_para_maquina(pos[0], pos[1], W, H)
             laser = bool(c.status and (c.status.spindle or 0) > 0 and c.status.estado.startswith("Run"))
             self.canvas.view.definir_cabecote(QPointF(dx, dy), laser)
+            self.tela_corte.vista.definir(QPointF(dx, dy), laser)
         else:
             self.canvas.view.definir_cabecote(None)
         livre = ativo and c.estado == cx.CONECTADO and c.controle
@@ -6492,9 +6590,18 @@ class MainWindow(QMainWindow):
             self.btn_controle.setChecked(False)
             self.btn_controle.setText("🔓 Liberar controle da máquina")
             self.btn_controle.blockSignals(False)
+        restante = self._tempo_do_trabalho(c)
+        tc = self.tela_corte
+        tc.btn_pausar.setEnabled(self.btn_pausar.isEnabled())
+        tc.btn_pausar.setText("▶  RETOMAR" if c.trabalho == cx.TRABALHO_PAUSADO else "⏸  PAUSAR")
+        tc.btn_parar.setEnabled(self.btn_parar.isEnabled())
+        tc.btn_ar.setEnabled(self.btn_ar.isEnabled())
+        if tc.btn_ar.isChecked() != self.btn_ar.isChecked():
+            tc.btn_ar.setChecked(self.btn_ar.isChecked())
         if c._job or rodando:
             self.progresso_trabalho.setValue(int(c.progresso * 1000))
-            self.progresso_trabalho.setFormat(f"{c.trabalho}: {c.trabalho_ok} de {len(c._job)} linhas (%p%)")
+            self.progresso_trabalho.setFormat(f"{c.trabalho}: {c.trabalho_ok} de {len(c._job)} linhas (%p%)"
+                                              + (f" — falta ≈ {tt.fmt(restante)}" if restante is not None else ""))
         elif c.trabalho != cx.TRABALHO_PARADO:
             self.progresso_trabalho.setValue(1000 if c.trabalho == cx.TRABALHO_FIM else 0)
             self.progresso_trabalho.setFormat(f"Trabalho: {c.trabalho}")

@@ -256,6 +256,7 @@ class Conexao:
         if not linhas:
             raise ComandoProibido("Trabalho vazio.")
         self._job, self._job_i, self._job_pend = linhas, 0, deque()
+        self.texto_trabalho = texto  # com os comentários: a tela mostra a camada de cada linha
         self.trabalho, self.trabalho_ok, self._esperando_fim = TRABALHO_RODANDO, 0, False
         self._evento(f"Trabalho iniciado: {len(linhas)} linhas.")
 

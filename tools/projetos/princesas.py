@@ -82,6 +82,7 @@ def ler(pdf):
             if k != "D3":  # lascas da junção silhueta + moldura (2 mm) só furariam a peça; nas letras são o miolo
                 furos = [h for h in furos if _area(h.toFillPolygon()) >= 15.0]
             pecas[k] = {"cont": s, "partes": [(s, "cont")] + [(h, "furo") for h in furos]}
+    doc.close()
     faltam = set(NOMES) - set(pecas)
     if faltam:
         raise ValueError(f"peças do mapa não encontradas: {sorted(faltam)}")

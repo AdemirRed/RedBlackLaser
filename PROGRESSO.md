@@ -776,3 +776,13 @@ laser desligado.
   linha sai na hora, mesmo com a tela ocupada. Teste: 400 linhas enviadas com a "tela" parada.
 - A mira redesenha só o quadradinho dela (0,5 ms em vez de 11 ms).
 - Os milhares de "ok" do trabalho não entram mais no registro; registro com contador (não perde as linhas novas).
+
+## 0.56.0 — tela de corte (F9) e tempo restante que se corrige pelo tempo real
+- Botão "Tela de corte" (F9) na barra Principal: mesa grande, estado, tempo decorrido, RESTANTE e hora de término em
+  números grandes, barra de %, camada de agora, e botões grandes PAUSAR/RETOMAR, PARAR e Air assist. "Voltar para a
+  edição" (ou F9) devolve a tela de sempre com os painéis como estavam.
+- Abre sozinha ao iniciar um trabalho (Configurações → Visual → desmarque para continuar na edição).
+- O caminho já feito com laser fica VERDE, tirado do próprio G-code (as linhas que a máquina já executou).
+- Tempo restante: estimativa de cada linha (comprimento ÷ velocidade) corrigida pela proporção tempo real ÷ estimado
+  do que já foi feito (como o LaserGRBL); pausa não conta. A barra do painel Máquina mostra "falta ≈".
+- O trabalho em andamento usa o G-code congelado no Iniciar: mexer no desenho só vale ao começar de novo.

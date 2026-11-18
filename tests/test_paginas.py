@@ -127,7 +127,7 @@ class PaginasTest(unittest.TestCase):
         self.assertTrue(w2.open_path(arq))
         self.assertEqual(w2.abas.tabText(0), "Parte 1")
         w2.close()
-        c = self.w.centralWidget().layout()
+        c = self.w.pilha_central.widget(0).layout()  # a tela de edição (a outra é a tela de corte)
         self.assertIs(c.itemAt(0).widget(), self.w.canvas)  # abas embaixo da mesa, como no Excel
 
 

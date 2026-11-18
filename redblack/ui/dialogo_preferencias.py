@@ -27,6 +27,7 @@ PADROES = {
     "tema_mesa": ("cinza", str),
     "espessura_linha": (2.5, float),
     "dicas_animadas": (True, bool),
+    "tela_corte_auto": (True, bool),
 }
 
 
@@ -94,6 +95,8 @@ class PreferenciasDialog(QDialog):
             ("tema_mesa", "Fundo da área de desenho", temas),
             ("espessura_linha", "Espessura das linhas dos desenhos na tela", num(1, 6, 1, " px")),
             ("dicas_animadas", "Dicas animadas nas ferramentas (passe o mouse num botão da barra lateral)",
+             QCheckBox()),
+            ("tela_corte_auto", "Abrir a tela de corte ao iniciar um trabalho (F9 alterna com a edição)",
              QCheckBox())])
         aba("Importar", [
             ("importar_centralizar", "Centralizar na mesa o que for importado", QCheckBox()),
