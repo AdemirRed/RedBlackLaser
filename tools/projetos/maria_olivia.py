@@ -85,6 +85,47 @@ def _oval(r):
     return c
 
 
+def _faixa(c, mm):
+    st = QPainterPathStroker()
+    st.setWidth(2 * mm)
+    return st.createStroke(c)
+
+
+DETALHE_MIN = 0.8  # mm²: gravação menor que isso é pontinho do traçado
+FECHA = 1.0        # mm (raio): no rebaixo, vãos e cantinhos de até ~2 mm e miolos de letra ficam fechados
+
+
+def _rebaixo_limpo(contornos, livres=(), folga=FOLGA, res=10.0):
+    """Rebaixo SEM detalhe pequeno: a união dos contornos das peças com vãos estreitos e furos fechados, + folga.
+    Só cresce em relação às peças (nunca fica menor que elas): a peça sempre entra."""
+    import numpy as np
+    from scipy.ndimage import binary_closing
+    from skimage.morphology import remove_small_holes
+    from skimage.measure import approximate_polygon, find_contours
+    caixa = contornos[0].boundingRect()
+    for c in contornos[1:]:
+        caixa = caixa.united(c.boundingRect())
+    caixa = caixa.adjusted(-3, -3, 3, 3)
+    m = pr._raster(contornos, caixa, res=res)
+    pad = int(FECHA * res) + 2
+    m = binary_closing(np.pad(m, pad), pr._disco(int(round(FECHA * res))))[pad:-pad, pad:-pad]
+    m = remove_small_holes(m, int(30 * res * res))  # miolos de letra (< 30 mm²); o rosto (grande) continua livre
+    out = QPainterPath()
+    out.setFillRule(Qt.OddEvenFill)
+    for linha in find_contours(np.pad(m, 1).astype(float), 0.5):
+        pts = [QPointF(caixa.left() + (x - 1) / res, caixa.top() + (y - 1) / res)
+               for y, x in approximate_polygon(linha, 0.3)]
+        if len(pts) > 3 and abs(pr._area_pts(pts)) > 2.0:
+            out.addPolygon(pts)
+            out.closeSubpath()
+    out = lu.suavizar(out, 0.3)
+    for pl in livres:  # rosto, pescoço e braços ficam na base: nunca rebaixados
+        out = out.subtracted(pl)
+    for c in contornos:  # garantia: o rebaixo cobre a peça inteira, mesmo onde o alisamento puxou 0,0x mm
+        out = out.united(c)
+    return _folga(out, folga)
+
+
 def _fora_e_furos(p):
     """Maior contorno de fora + os furos dentro dele (pedacinhos soltos que sobram do recorte são descartados)."""
     polys = [q for q in p.toSubpathPolygons() if len(q) > 2 and abs(pr._area_pts(list(q))) > 1.0]
@@ -131,11 +172,12 @@ def ler(pdf):
                 assert k not in apl, k
                 apl[k] = (cont, furos)
         elif d["type"] == "f" and tuple(round(v, 2) for v in d["fill"]) == (0.94, 0.82, 0.64):
-            pele.append(tf.map(caminho({**d, "closePath": True})))  # rosto, pescoço e braços (ficam na base)
+            pele.append(lu.suavizar(tf.map(caminho({**d, "closePath": True})), 0.6))  # rosto, pescoço, braços (base)
         elif d["type"] == "f" and tuple(round(v, 2) for v in d["fill"]) == (0.27, 0.16, 0.06):
             g = tf.map(caminho({**d, "closePath": True}))
             if g.boundingRect().width() * g.boundingRect().height() > 0.05:
-                detalhes.append(g)
+                liso = lu.suavizar(g, 0.4)  # as linhas gravadas também vieram tremidas (traçado ampliado 1,8×)
+                detalhes.append(liso if not liso.isEmpty() else g)
     for k, (_y, cont, furos) in zip(LATERAIS, sorted(laterais, key=lambda t: t[0])):
         apl[k] = (cont, furos)
     assert set(apl) == set(TAMANHOS), set(TAMANHOS) - set(apl)
@@ -153,25 +195,27 @@ def ler(pdf):
     cab = _area_util(*apl["C01"])
     for tira in [apl["D01"][0], apl["K01"][0]] + pele:
         cab = cab.subtracted(tira)
-    cont, furos = _fora_e_furos(cab.simplified())
-    apl["C01"] = (cont, furos)
+    cont, _furos = _fora_e_furos(cab.simplified())
+    apl["C01"] = (cont, [])  # sem o vão da faixa branca do PDF: na foto o cabelo é contínuo sob a coroa
     pecas = {}
     solido = QPainterPath(fora).subtracted(janela)
-    rebaixo_base = QPainterPath()
+    rebaixo_base = _rebaixo_limpo([apl[k][0] for k in apl if k not in SOBRE], pele)
     for k, (cont, furos) in apl.items():
         partes = [(cont, "cont")] + [(f, "furo") for f in furos]
         util = _area_util(cont, furos)
-        partes += [(g, "cheio") for g in detalhes if util.contains(g.boundingRect().center())]
+        borda = _faixa(cont, 1.5)  # gravação colada na borda parece queimado: fica só a de dentro
+        partes += [(g, "cheio") for g in detalhes  # mechas e pregas; pontinhos soltos não
+                   if util.contains(g.boundingRect().center()) and pr._area(g) >= DETALHE_MIN
+                   and pr._area(g.intersected(borda)) < 0.25 * pr._area(g)]  # prega que chega na barra fica
         pecas[k] = {"cont": cont, "partes": partes}
-        if k not in SOBRE:
-            rebaixo_base = rebaixo_base.united(_folga(util, FOLGA))
     for k, alvo in SOBRE.items():  # coração na coroa, miolo na flor
         c, f = apl[k]
         cont_alvo, furos_alvo = apl[alvo]
         reb = _folga(_area_util(c, f), FOLGA).intersected(_area_util(cont_alvo, furos_alvo))
         pecas[alvo]["partes"].append((reb, "rebaixo"))
-    det_base = [g for g in detalhes if solido.contains(g.boundingRect().center())
-                and not any(_area_util(*apl[k]).contains(g.boundingRect().center()) for k in apl)]
+    # na base só o rosto (olhos, nariz, boca): o resto cairia dentro do rebaixo ou seria sobra de cabelo/vestido
+    det_base = [g for g in detalhes if any(pl.contains(g.boundingRect().center()) for pl in pele)
+                and not g.intersects(rebaixo_base)]
     pecas["P01"] = {"cont": fora, "partes": [(fora, "cont"), (janela, "furo"),
                                              (rebaixo_base.intersected(solido), "rebaixo")]
                     + [(g, "cheio") for g in det_base]}
