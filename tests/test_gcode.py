@@ -122,6 +122,21 @@ M2 ; fim do programa
         self.assertEqual(info["s_max"], 200)                 # 20 % padrão
         self.assertEqual(info["x"][0], 0.0)
 
+    def test_pulo_curto_na_gravacao_nao_usa_g0(self):
+        """Gravação com buraco (anel): o pulo sobre o miolo sai G1 S0 na velocidade da camada, não G0 (G0 no
+        vai-e-volta fazia o motor perder passo e a imagem escorrer depois de 1 h)."""
+        from PySide6.QtGui import QPainterPath
+        p = QPainterPath()
+        p.addRect(QRectF(50, 50, 40, 20))
+        p.addRect(QRectF(60, 55, 20, 10))
+        s = ob.Shape(p, "anel", "C02", cm.cor("C02")).snapshot()
+        lay = [layer("C02", modo="preenchimento", intervalo_mm=1.0, velocidade_mm_min=2000)]
+        linhas = gerar([s], lay).splitlines()
+        i0 = next(i for i, ln in enumerate(linhas) if ln.startswith("; Camada C02"))
+        meio = [ln for ln in linhas[i0:] if ln.startswith(("G0", "G1"))][1:-1]
+        self.assertFalse([ln for ln in meio if ln.startswith("G0")])
+        self.assertTrue(any(ln.endswith("S0") or " S0" in ln for ln in meio))
+
     def test_curva_tem_comprimento_correto(self):
         s = ob.Shape(fm.ellipse_path(QRectF(100, 100, 40, 40)), "c", "C01", "#fff").snapshot()
         info = gc.analisar(gerar([s], [layer()]))

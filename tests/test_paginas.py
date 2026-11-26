@@ -59,6 +59,46 @@ class PaginasTest(unittest.TestCase):
         self.assertEqual(self.nomes(), ["só na 2"])
         self.assertFalse(self.w.excluir_pagina())  # fica pelo menos uma
 
+    def test_marcar_feita_falta_e_automatico(self):
+        from redblack import conexao as cx
+        self.assertEqual(self.w.progresso_abas.text(), "")  # uma página, nada marcado: some
+        self.w.adicionar_pagina()
+        self.w.adicionar_pagina()
+        self.assertTrue(self.w.marcar_pagina(0))
+        self.assertFalse(self.w.marcar_pagina(0))  # já estava
+        self.assertEqual(self.w.abas.tabText(0), "✓ Página 1")
+        self.assertIn("Feitas 1 de 3", self.w.progresso_abas.text())
+        self.assertIn("Falta: Página 2, Página 3", self.w.progresso_abas.text())
+        self.w.undo_stack.undo()  # desfazer desmarca
+        self.assertFalse(self.w.pagina_feita(0))
+        self.w.undo_stack.redo()
+        self.w.adicionar_pagina(duplicar=False)
+        self.w.ir_para_pagina(0)
+        self.w.adicionar_pagina(duplicar=True)  # a cópia de uma feita ainda não foi cortada
+        self.assertEqual(self.w.nomes_paginas[1], "Página 1 (cópia)")
+
+        class Maquina:
+            trabalho = cx.TRABALHO_ERRO
+        job = ["G1 X1"]
+        self.w._job_visto = job
+        self.w._aba_do_trabalho = (2, "Página 2", job)
+        self.w._marcar_aba_do_trabalho(Maquina)  # parado/erro: não marca
+        self.assertFalse(self.w.pagina_feita(2))
+        Maquina.trabalho = cx.TRABALHO_FIM
+        self.w._marcar_aba_do_trabalho(Maquina)  # terminou: marca a aba de onde saiu
+        self.assertTrue(self.w.pagina_feita(2))
+        self.assertIsNone(self.w._aba_do_trabalho)
+        arq = os.path.join(self.tmp.name, "f.rbl")
+        self.assertTrue(self.w.save_to(arq))
+        w2 = MainWindow(QSettings(os.path.join(self.tmp.name, "t4.ini"), QSettings.IniFormat))
+        w2.ask_save = lambda: "discard"
+        w2.show_info = w2.show_error = lambda *a: None
+        self.assertTrue(w2.open_path(arq))
+        self.assertEqual([w2.pagina_feita(i) for i in range(len(w2.paginas))], [True, False, True, False, False])
+        self.assertTrue(w2.desmarcar_todas())
+        self.assertFalse(any(w2.pagina_feita(i) for i in range(len(w2.paginas))))
+        w2.close()
+
     def test_desfazer_entre_paginas(self):
         demo = self.nomes()
         self.w.adicionar_pagina()

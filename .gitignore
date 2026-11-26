@@ -7,3 +7,6 @@ dist/
 
 # capturas usadas no README
 !docs/img/*.png
+
+# dados pessoais de clientes (Pix etc.): só neste PC
+tools/projetos/privado/

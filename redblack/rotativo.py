@@ -24,6 +24,7 @@ class Rotativo:
     diametro_rolo_mm: float = 20.0
     espelhar: bool = False
     eixo: str = "Y"  # motor do rotativo ligado no Y (padrão) ou no X; o desenho não muda, só a saída
+    vel_giro_max: float = 1000.0  # mm/min no eixo do rotativo: giro rápido faz a peça patinar no rolo
 
     @property
     def diametro_referencia(self) -> float:
@@ -45,7 +46,7 @@ def erros(r: Rotativo) -> list:
     if r.eixo not in ("X", "Y"):
         out.append("eixo do rotativo inválido")
     for n, lo, hi in (("mm_por_rotacao", 0.1, 100000), ("diametro_objeto_mm", 0.1, 2000),
-                      ("diametro_rolo_mm", 0.1, 500)):
+                      ("diametro_rolo_mm", 0.1, 500), ("vel_giro_max", 50, 20000)):
         v = getattr(r, n)
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
             out.append(f"{n} fora de {lo}–{hi}")

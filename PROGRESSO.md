@@ -786,3 +786,43 @@ laser desligado.
 - Tempo restante: estimativa de cada linha (comprimento ÷ velocidade) corrigida pela proporção tempo real ÷ estimado
   do que já foi feito (como o LaserGRBL); pausa não conta. A barra do painel Máquina mostra "falta ≈".
 - O trabalho em andamento usa o G-code congelado no Iniciar: mexer no desenho só vale ao começar de novo.
+
+## 0.57.0 — abas feitas / que faltam, pausa que apaga o laser de verdade, rebaixo rápido
+- Abas (chapas) marcadas como FEITAS: botão direito na aba → "Feita (já cortada/gravada)" marca/desmarca;
+  "Desmarcar todas" para cortar de novo. A aba feita fica verde com ✓ no nome e, ao lado das abas, aparece
+  "Feitas 2 de 3 · Falta: Chapa 3" (dica com a lista inteira). Quando o trabalho de uma aba TERMINA na máquina
+  (não parado nem com erro), ela é marcada sozinha. A marca vai salva no .rbl (no nome da aba) e entra no desfazer.
+- Pausa: além de mandar apagar o laser (0x9E), confere pelo status do GRBL se o laser apagou mesmo; se não apagou,
+  repete até 3 vezes e então faz o reset (para tudo e apaga) com aviso — laser parado aceso queimava o material.
+- Projetos (tools/projetos): rebaixo com linhas a cada 0,15 mm (era 0,1): ~1/3 mais rápido. (Linhas a cada 1 mm +
+  contorno, para tirar com formão, foi testado e não deu certo.) Novo projeto Douglas (PDF Carine V2).
+- Versão 0.57.1 — rotativo:
+  - Volta final com rotativo ia ao "Y0 da mesa" multiplicado pela escala (milhares de mm de giro para trás: peça
+    escorregava e passava do curso). Agora o eixo que gira volta só ao começo do trabalho.
+  - Velocidade na superfície: trechos em volta da peça ficavam `fator` × mais lentos (queimavam mais); o F de cada
+    trecho é corrigido pela razão comando/superfície (degraus de 10, máx. do perfil).
+  - Rotativo com $20=1 (limite por software) é recusado antes de enviar, com instrução.
+  - Menu Laser: liberar GRBL ($20=0) / religar ($20=1) com confirmação; teste 0 (girar uma volta, $J, sem laser);
+    teste 1 (volta completa com escala -5…+5, aba nova); teste 2 (medidas, espelhado, 2 passadas);
+    corrigir mm por rotação pelo teste 1 (mm × C / (C + erro)). Módulo redblack/teste_rotativo.py.
+  - Tutorial em PDF (6 págs.): F:\Downloads\RedBlack_Tutorial_Rotativo.pdf.
+- Versão 0.57.2 — rotativo (usuário: "ficou pior", "referenciar vai para outro lado", "volta fora da posição"):
+  - Referenciar ($H) bloqueado com rotativo (o motor do Y gira a peça; homing nunca acha o fim de curso); o
+    referenciar automático ao liberar o controle também é pulado.
+  - Velocidade máxima de giro (Rotativo.vel_giro_max, padrão 1000 mm/min): deslocamentos com rotativo saem em G1 S0
+    (não G0), e todo trecho limita o F para o eixo que gira não passar do teto; setas/enquadrar/ir até ponto também.
+    A correção de velocidade na superfície da 0.57.1 acelerava o giro (peça patinava).
+  - Com rotativo o trabalho sempre começa da posição atual (_comecar_daqui).
+  - Calibração em 1 pergunta: "girar uma volta da peça" manda π×D×fator e pergunta quantas voltas a PEÇA deu;
+    mm por rotação = atual / voltas.
+  - Guia de 1 página: Rotativo em 5 passos.
+- Versão 0.57.3 — gravação "escorrendo" depois de ~1 h e batendo no limite das laterais (quadro Jesus 360 mm):
+  - Pulos curtos (até 30 mm, SALTO_GRAVACAO_MM) dentro de camada em Preenchimento saem G1 S0 na velocidade da
+    camada, não G0. Os milhares de G0 no vai-e-volta da imagem (velocidade máxima do GRBL) faziam o motor perder
+    passo; cada passo perdido desloca o resto da gravação. Teste: test_pulo_curto_na_gravacao_nao_usa_g0.
+- Versão 0.58.0 — referenciar no meio do trabalho (pedido do dono: eixo X perdendo passo):
+  - Tela da máquina: "Referenciar de novo a cada 10 min no trabalho" (só com fim de curso, $22=1, e sem rotativo).
+  - Conexao.iniciar_trabalho(texto, referenciar_a_cada_s): passado o tempo, o envio para antes de um deslocamento
+    sem laser (G0 ou G1 com S0), espera a máquina ficar Idle, manda $H, rearma o laser (M3/M4 sem S: o S modal
+    continua) e segue da mesma linha. A origem G54 fica no controlador, então as coordenadas continuam valendo.
+    Erro/alarme no $H para o trabalho (reset) e dá para "Retomar interrompido". Teste: ReferenciaNoTrabalhoTest.

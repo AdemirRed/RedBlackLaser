@@ -231,6 +231,19 @@ def ler(pdf):
     return pecas
 
 
+# mm entre as linhas do rebaixo: 0,15 corta ~1/3 do tempo do 0,1 testado. Linhas a cada 1 mm + contorno (para tirar
+# com formão) foi testado pelo dono em 19/11/2026 e NÃO deu certo: não funcionou e o rebaixo saiu desalinhado.
+RAPIDO_INTERVALO = 0.15
+
+
+def rebaixo_rapido(c):
+    """Rebaixo de preenchimento contínuo (como o testado a 0,1 mm), só um pouco mais espaçado: Maria Olivia 3 h 29 →
+    2 h 19. Sem subcamada de contorno (contorno por cima do preenchimento ficou desalinhado)."""
+    return cm.alterar(c, nome=f"Rebaixo dos encaixes (gravado; linhas a cada {RAPIDO_INTERVALO:g} mm; peça + "
+                              f"{FOLGA:g} mm por lado)",
+                      intervalo_mm=RAPIDO_INTERVALO, subcamadas=())
+
+
 def camadas():
     corte = dict(mt.corte_mdf(3), velocidade_mm_min=630.0)
     out = [cm.alterar(cm.Camada(REBAIXO, f"Rebaixo dos encaixes (gravado; peça + {FOLGA:g} mm por lado)"),
@@ -263,14 +276,16 @@ def _gerar(pdf, saida, png=None):
     notas = ("Porta-retrato Maria Olivia — MDF 3 mm, foto 150 × 217 (PDF Rev. 01). 18 peças em "
              f"{len(chapas)} chapa(s) de 365 × 370, 2 mm da borda e entre peças.\n"
              "Contornos alisados (o PDF é traçado de imagem).\n"
-             f"REBAIXO (C10, gravado, 1º, 1500 mm/min 60 % 1 passada): contorno da peça + {FOLGA:g} mm por lado, só "
+             f"REBAIXO (C10, gravado, 1º, 1500 mm/min 60 % 1 passada, linhas a cada {RAPIDO_INTERVALO:g} mm): "
+             f"contorno da peça + {FOLGA:g} mm por lado, só "
              "onde há MDF. Base P01: nome, cabelo, coroa, vestido, corações H02–H05 e flor. Coroa K01: coração H01. "
              "Flor F01: miolo M01.\nDetalhes (C03, 2000 mm/min 35 %): mechas do cabelo, vestido e rosto.\n"
              "Cores: cabelo marrom, coroa e flor amarelas, vestido verde (cintura branca pintada), corações e miolo "
              "vermelhos, nome verde; rosto e braços ficam no MDF da base.\n"
              "Montagem: espaçadores P02/P03/P04 colados no verso de P01 (topo aberto para a foto), fundo P05, apoios "
              "P06/P07 no verso em X85 e X207. Os rebaixos ocultos do verso do PDF não estão no arquivo.")
-    pj.save(saida, snaps[0], camadas(), notas=notas, paginas=[None] + [(s, (), ()) for s in snaps[1:]],
+    lays = [rebaixo_rapido(c) if c.id == REBAIXO else c for c in camadas()]  # rebaixo rápido desde 19/11/2026
+    pj.save(saida, snaps[0], lays, notas=notas, paginas=[None] + [(s, (), ()) for s in snaps[1:]],
             pagina_atual=0, nomes_paginas=[f"Chapa {i + 1}" for i in range(len(chapas))])
     if png:
         pr.previa(chapas, png)

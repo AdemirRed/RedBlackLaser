@@ -26,8 +26,8 @@ CANTOS = [("ESQUERDA", (0.0, 80.0)), ("DIREITA", (322.0, 414.0))]  # faixa x (mm
 
 def coracoes(pdf):
     """[(QPainterPath em mm, x, y)] na ordem de desenho; origem: canto de baixo à esquerda da frente (topo da base)."""
-    pg = pymupdf.open(pdf)[0]
-    ds = pg.get_drawings()
+    with pymupdf.open(pdf) as doc:  # fechado: aberto e esquecido estoura o limite de arquivos do processo
+        ds = doc[0].get_drawings()
     base = next(d["rect"] for d in ds if d["items"][0][0] == "re" and 405 < d["rect"].width < 415
                 and d["rect"].height < 12)
     k = base.width / 426.0                         # pt por mm

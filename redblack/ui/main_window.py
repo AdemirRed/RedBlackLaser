@@ -77,6 +77,7 @@ from .icons import icon
 
 
 COL_SAIDA, COL_EXIBIR = 2, 3  # colunas da tabela de camadas
+FEITA = "✓ "  # no início do nome da aba = já cortada/gravada (vai no .rbl sem mudar o formato)
 LAYOUT_VERSAO = 5  # aumentar quando barras/painéis mudarem de forma que layouts salvos fiquem ruins
 
 
@@ -141,6 +142,10 @@ class StateCommand(QUndoCommand):
 
     def undo(self):
         self.win.set_doc_state(self.before)
+
+
+REREF_MIN = 10  # referência ($H) no meio do trabalho a cada tantos minutos (opção na tela da máquina)
+MSG_REFERENCIAR_ROTATIVO = 'Com o ROTATIVO ligado não existe referência: o motor do Y agora gira a peça e nunca acha o fim de curso.\n\nPosicione o laser na peça com as setas e use Iniciar a partir da POSIÇÃO ATUAL. Para referenciar, desligue o rotativo e volte o cabo do Y.'
 
 
 class MainWindow(QMainWindow):
@@ -401,7 +406,10 @@ class MainWindow(QMainWindow):
         self.abas.setAccessibleName("Páginas do projeto")
         self.abas.currentChanged.connect(lambda i: None if self._sync_abas else self.ir_para_pagina(i))
         self.abas.tabBarDoubleClicked.connect(self._renomear_pagina_dialogo)
-        self.abas.setToolTip("Clique para trocar de página; duplo clique para renomear")
+        self.abas.setToolTip("Clique para trocar de página; duplo clique para renomear; botão direito: marcar como "
+                             "feita (✓). A aba é marcada sozinha quando o trabalho dela termina na máquina.")
+        self.abas.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.abas.customContextMenuRequested.connect(self._menu_aba)
         self._sync_abas = False
         barra.addWidget(self.abas)
         for txt, dica, fn in (("+", "Adicionar página (vazia)", lambda: self.adicionar_pagina(False)),
@@ -414,6 +422,9 @@ class MainWindow(QMainWindow):
             b.clicked.connect(fn)
             barra.addWidget(b)
         barra.addStretch(1)
+        self.progresso_abas = QLabel()
+        self.progresso_abas.setAccessibleName("Páginas feitas e que faltam")
+        barra.addWidget(self.progresso_abas)
         topo = QWidget()
         topo.setLayout(barra)
         topo.setFixedHeight(32)  # altura fixa: trocar/estilizar abas nunca desloca a mesa
@@ -433,9 +444,72 @@ class MainWindow(QMainWindow):
         for i, nome in enumerate(self.nomes_paginas):
             if self.abas.tabText(i) != nome:
                 self.abas.setTabText(i, nome)
+            self.abas.setTabTextColor(i, QColor("#2e7d32") if self.pagina_feita(i) else QColor())  # inválida = padrão
         if self.abas.currentIndex() != self.pagina_atual:
             self.abas.setCurrentIndex(self.pagina_atual)
         self._sync_abas = False
+        feitas = [self.pagina_feita(i) for i in range(len(self.nomes_paginas))]
+        falta = [n for n, f in zip(self.nomes_paginas, feitas) if not f]
+        if len(feitas) < 2 and not any(feitas):
+            txt = ""  # projeto de uma página só, nada marcado: não ocupa a barra
+        elif not falta:
+            txt = f"✔ Tudo feito ({len(feitas)} de {len(feitas)})"
+        else:
+            txt = f"Feitas {sum(feitas)} de {len(feitas)}  ·  Falta: " + ", ".join(falta[:4]) + (
+                f" e mais {len(falta) - 4}" if len(falta) > 4 else "")
+        self.progresso_abas.setText(txt)
+        self.progresso_abas.setToolTip("\n".join(("✓ " if f else "○ ") + n.removeprefix(FEITA)
+                                                 for n, f in zip(self.nomes_paginas, feitas)))
+
+    # ---------- o que já foi feito e o que falta (marca "✓ " no nome da aba: vai junto ao salvar/duplicar/desfazer) ----
+    def pagina_feita(self, i) -> bool:
+        return self.nomes_paginas[i].startswith(FEITA)
+
+    def marcar_pagina(self, i, feita=True) -> bool:
+        return self._marcar_paginas([i], feita)
+
+    def desmarcar_todas(self) -> bool:
+        return self._marcar_paginas(range(len(self.paginas)), False)
+
+    def _marcar_paginas(self, indices, feita) -> bool:
+        mudar = [i for i in indices if 0 <= i < len(self.paginas) and self.pagina_feita(i) != feita]
+        if not mudar:
+            return False
+
+        def fazer():
+            for i in mudar:
+                n = self.nomes_paginas[i]
+                self.nomes_paginas[i] = (FEITA + n)[:pj.MAX_NOME_PAGINA] if feita else n.removeprefix(FEITA)
+        self._edit("Marcar página como feita" if feita else "Desmarcar página feita", fazer)
+        self._atualizar_abas()
+        return True
+
+    def _menu_aba(self, pos):
+        i = self.abas.tabAt(pos)
+        if i < 0:
+            return
+        m = QMenu(self)
+        a = m.addAction("Feita (já cortada/gravada)")
+        a.setCheckable(True)
+        a.setChecked(self.pagina_feita(i))
+        a.triggered.connect(lambda on: self.marcar_pagina(i, on))
+        m.addAction("Renomear…", lambda: self._renomear_pagina_dialogo(i))
+        if any(self.pagina_feita(k) for k in range(len(self.paginas))):
+            m.addSeparator()
+            m.addAction("Desmarcar todas (vai cortar de novo)", self.desmarcar_todas)
+        m.exec(self.abas.mapToGlobal(pos))
+
+    def _marcar_aba_do_trabalho(self, c):
+        """Trabalho que terminou normalmente (não parado/erro): a aba de onde ele saiu fica feita."""
+        pend = getattr(self, "_aba_do_trabalho", None)
+        if pend is None or c.trabalho != cx.TRABALHO_FIM or pend[2] is not getattr(self, "_job_visto", None):
+            return
+        self._aba_do_trabalho = None
+        i, nome = pend[0], pend[1]
+        if not (0 <= i < len(self.nomes_paginas) and self.nomes_paginas[i] == nome):
+            i = self.nomes_paginas.index(nome) if nome in self.nomes_paginas else -1  # abas mudaram durante o corte
+        if self.marcar_pagina(i, True):
+            self.statusBar().showMessage(f"✓ {nome} marcada como feita.")
 
     # ---------- tempo estimado de serviço (aba aberta e projeto inteiro) ----------
     tempos_estimados = None  # {"aba": s, "total": s, "por_aba": [s ou None, ...]} depois do cálculo
@@ -530,7 +604,8 @@ class MainWindow(QMainWindow):
 
         def fazer():
             nova = self._pagina_da_mesa() if duplicar else ((), (), ())
-            nome = self.nomes_paginas[self.pagina_atual] + " (cópia)" if duplicar else self._nome_livre()
+            nome = self.nomes_paginas[self.pagina_atual].removeprefix(FEITA) + " (cópia)" if duplicar \
+                else self._nome_livre()  # a cópia ainda não foi cortada
             self.nomes_paginas.insert(self.pagina_atual + 1, nome[:pj.MAX_NOME_PAGINA])
             self.paginas.insert(self.pagina_atual + 1, nova)
             self._abrir_pagina(self.pagina_atual + 1)
@@ -1173,11 +1248,135 @@ class MainWindow(QMainWindow):
             ("mm_por_rotacao", "mm por rotação (calibrar na máquina)", r.mm_por_rotacao, (0.1, 100000, 3, " mm")),
             ("diametro_objeto_mm", "Diâmetro da peça", r.diametro_objeto_mm, (0.1, 2000, 3, " mm")),
             ("diametro_rolo_mm", "Diâmetro do rolo (tipo Rolo)", r.diametro_rolo_mm, (0.1, 500, 3, " mm")),
+            ("vel_giro_max", "Velocidade máxima de giro (peça não patina)", r.vel_giro_max, (50, 20000, 0, " mm/min")),
             ("espelhar", "Espelhar a saída", r.espelhar, None)],
             "Desenhe na medida real da superfície (altura do desenho = volta na peça; a circunferência da peça é "
             "π × diâmetro). Valores NÃO validados: calibre 'mm por rotação' na máquina antes de gravar.")
         if v:
             self.definir_rotativo(rtv.Rotativo(**v))
+
+    def inserir_teste_rotativo(self, n) -> bool:
+        """Teste do rotativo numa aba nova (o desenho do usuário fica intacto). Gravar com Iniciar normal."""
+        from .. import teste_rotativo as trt
+        r = self.rotativo
+        if not r.ativo:
+            self.show_error("Teste do rotativo", "Ligue o rotativo antes (Laser → Configuração do rotativo) e "
+                                                 "confira o diâmetro da peça.")
+            return False
+        if not self.adicionar_pagina():
+            return False
+        self.renomear_pagina(self.pagina_atual, f"Teste {n} do rotativo")
+        cx, y0 = g.BED_W / 2, 10.0
+        lid = "C25" if n == 1 else "C26"
+        itens = (trt.volta_completa(r.diametro_objeto_mm, cx, y0) if n == 1 else trt.medidas(cx, y0))
+        shapes = [ob.Shape(pa, nome, lid, cm.cor(lid)) for pa, nome in itens]
+        self._edit(f"Teste {n} do rotativo", lambda: [self.canvas.scene.addItem(s) for s in shapes])
+        self.set_layer_fields(lid, {"nome": f"Teste {n} rotativo (ajuste a potência ao material)", "modo": "linha",
+                                    "velocidade_mm_min": 1000.0, "potencia_max": 30.0, "passadas": 1 if n == 1 else 2},
+                              "Camada do teste do rotativo")
+        self._rebuild_objects()
+        self._refresh_preview()
+        self.statusBar().showMessage(f"Teste {n} do rotativo pronto nesta aba: posicione o laser na peça e use "
+                                     "Iniciar (a partir da posição atual).")
+        return True
+
+    def _conexao_pronta(self, titulo):
+        c = self.conexao
+        if c is None or c.estado != cx.CONECTADO:
+            self.show_error(titulo, "Conecte à máquina primeiro (painel Máquina → Conectar).")
+            return None
+        return c
+
+    def ask_sim(self, titulo, texto) -> bool:
+        """Pergunta sim/não. Substituível nos testes."""
+        return QMessageBox.question(self, titulo, texto) == QMessageBox.Yes
+
+    def limite_grbl(self, ligado) -> bool:
+        """$20=1/0 na placa, com confirmação (é configuração gravada no GRBL)."""
+        titulo = "Limite de curso do GRBL ($20)"
+        c = self._conexao_pronta(titulo)
+        if c is None:
+            return False
+        txt = ("Religar o limite de curso por software ($20=1)? Use quando voltar para a MESA PLANA."
+               if ligado else
+               "Desligar o limite de curso por software ($20=0)?\n\nNecessário para o ROTATIVO: o eixo que gira "
+               "passa do tamanho da mesa e o GRBL travaria em ALARME. Fica gravado na placa até você religar "
+               "(Laser → Rotativo: religar limite de curso).")
+        if not self.ask_sim(titulo, txt):
+            return False
+        try:
+            c.limite_software(ligado)
+        except cx.ComandoProibido as e:
+            self.show_error(titulo, str(e))
+            return False
+        self.statusBar().showMessage(f"Enviado $20={1 if ligado else 0}.", 6000)
+        return True
+
+    def girar_uma_volta(self) -> bool:
+        """Teste 0: o eixo do rotativo anda 'mm por rotação' (laser desligado). Tem que dar uma volta exata."""
+        titulo = "Teste 0 do rotativo"
+        r = self.rotativo
+        if not r.ativo:
+            self.show_error(titulo, "Ligue o rotativo antes (Laser → Configuração do rotativo).")
+            return False
+        c = self._conexao_pronta(titulo)
+        if c is None:
+            return False
+        if c.info.valor(20, 0) == 1:
+            self.show_error(titulo, "A placa está com $20=1: use antes Laser → Rotativo: liberar GRBL ($20=0).")
+            return False
+        volta = r.circunferencia_objeto * r.fator  # comando para a PEÇA dar uma volta
+        try:
+            if r.eixo == "Y":
+                c.jog(0.0, volta, r.vel_giro_max)
+            else:
+                c.jog(volta, 0.0, r.vel_giro_max)
+        except cx.ComandoProibido as e:
+            self.show_error(titulo, str(e))
+            return False
+        voltas = self.ask_voltas()
+        if voltas is None or abs(voltas - 1) < 0.01:
+            if voltas is not None:
+                self.statusBar().showMessage("Deu uma volta certa: rotativo calibrado.", 8000)
+            return True
+        novo = r.mm_por_rotacao / voltas
+        self.definir_rotativo(replace(r, mm_por_rotacao=round(novo, 3)))
+        self.show_info(titulo, f"Corrigido: {r.mm_por_rotacao:g} → {novo:.3f}.\n\nFaça o teste de novo: agora tem "
+                       "que dar UMA volta certinha.")
+        return True
+
+    def ask_voltas(self):
+        """Quantas voltas a peça deu no teste (ou None). Substituível nos testes."""
+        v = self.ask_valores("Quantas voltas a peça deu?", [
+            ("voltas", "Voltas que a PEÇA deu (1 = certo; 1,5 = uma e meia; 0,75 = três quartos)", 1.0,
+             (0.05, 50, 2, ""))],
+            "Olhe o risco que você fez na PEÇA (não no rolo). Espere o giro terminar e diga quantas voltas ela deu.")
+        return v["voltas"] if v else None
+
+    def ask_erro_rotativo(self):
+        """Erro lido no teste 1 (mm) ou None. Substituível nos testes."""
+        v = self.ask_valores("Corrigir mm por rotação", [
+            ("erro", "A linha B caiu em qual traço da escala?", 0.0, (-50, 50, 2, " mm"))],
+            "No teste 1, veja onde a linha B (2ª volta) caiu na escala ao lado da linha A: traço +2 = passou 2 mm "
+            "(use números positivos), -2 = faltou 2 mm. Se caiu entre traços, estime (ex.: 1,5).")
+        return v["erro"] if v else None
+
+    def _corrigir_rotativo_dialogo(self):
+        from .. import teste_rotativo as trt
+        r = self.rotativo
+        e = self.ask_erro_rotativo()
+        if e is None:
+            return False
+        try:
+            novo = trt.corrigir(r.mm_por_rotacao, r.diametro_objeto_mm, e)
+        except ValueError as err:
+            self.show_error("Corrigir mm por rotação", str(err))
+            return False
+        ok = self.definir_rotativo(replace(r, mm_por_rotacao=round(novo, 3)))
+        if ok:
+            self.show_info("Rotativo corrigido", f"mm por rotação: {r.mm_por_rotacao:g} → {novo:.3f}\n\n"
+                           "Grave o teste 1 de novo: a linha B tem que cair no 0 (±0,5 mm).")
+        return ok
 
     def otimizacao(self) -> dict:
         """Opções de ordem de corte (Configurações → Otimização de corte)."""
@@ -3979,7 +4178,8 @@ class MainWindow(QMainWindow):
                         self._act("Pausar", "pause", 15), self._act("Parar", "stop", 15), None,
                         self.act_preview, self.act_gcode, self.act_matriz, self.act_precisao, self.act_cal_xy,
                         self.act_comp_x, self.act_resultado,
-                        self.act_rotativo,
+                        self.act_rotativo, self.act_rot_liberar, self.act_rot_volta, self.act_rot_teste1,
+                        self.act_rot_teste2, self.act_rot_corrigir, self.act_rot_religar,
                         self.act_maquina])
 
         win = mb.addMenu("&Janela")
@@ -4154,6 +4354,23 @@ class MainWindow(QMainWindow):
         self.act_matriz.setToolTip("Gera um G-code com quadrados em várias potências e velocidades para achar os "
                                    "parâmetros do material — nada é enviado à máquina")
         self.act_rotativo = self._act("Configuração do &rotativo…", slot=self._rotativo_dialogo)
+        self.act_rot_teste1 = self._act("Rotativo: teste 1 — volta completa", slot=lambda: self.inserir_teste_rotativo(1))
+        self.act_rot_teste1.setToolTip("Duas linhas a uma volta da peça de distância + escala: mostra quanto o "
+                                       "'mm por rotação' está errado")
+        self.act_rot_teste2 = self._act("Rotativo: teste 2 — medidas e escorregamento",
+                                        slot=lambda: self.inserir_teste_rotativo(2))
+        self.act_rot_teste2.setToolTip("Quadrado 20 mm, círculo, linhas e texto em 2 passadas: confere medida em "
+                                       "volta, espelhado e se a peça escorrega")
+        self.act_rot_corrigir = self._act("Rotativo: corrigir mm por rotação pelo teste 1…",
+                                          slot=self._corrigir_rotativo_dialogo)
+        self.act_rot_liberar = self._act("Rotativo: liberar GRBL ($20=0)…", slot=lambda: self.limite_grbl(False))
+        self.act_rot_liberar.setToolTip("Desliga o limite de curso por software: com o rotativo o eixo gira sem fim")
+        self.act_rot_religar = self._act("Rotativo: religar limite de curso ($20=1)…",
+                                         slot=lambda: self.limite_grbl(True))
+        self.act_rot_volta = self._act("Rotativo: CALIBRAR — girar uma volta da peça (sem laser)",
+                                       slot=self.girar_uma_volta)
+        self.act_rot_volta.setToolTip("Faça um risco na peça: ela tem que dar exatamente UMA volta. Depois diga "
+                                      "quantas deu e o programa corrige sozinho")
         self.act_maquina = self._act("Configurações da &máquina…", "machine", slot=self._maquina_dialogo)
         self.act_maquina.setToolTip("Configurações da máquina: área da mesa, canto da origem, M3/M4, S máximo")
         self.act_resultado = self._act("Salvar material do &quadrado escolhido…", slot=self._resultado_matriz_dialogo)
@@ -5276,6 +5493,12 @@ class MainWindow(QMainWindow):
         self.chk_home_auto.setChecked(self.settings.value("home_ao_liberar", False, type=bool))
         self.chk_home_auto.toggled.connect(lambda on: self.settings.setValue("home_ao_liberar", on))
         v.addWidget(self.chk_home_auto)
+        self.chk_reref = QCheckBox(f"Referenciar de novo a cada {REREF_MIN} min no trabalho")
+        self.chk_reref.setToolTip("Máquina com fim de curso: a cada tanto o envio para num deslocamento sem laser, faz o "
+                                  "homing ($H) e continua da mesma linha. Corrige passo perdido antes de acumular.")
+        self.chk_reref.setChecked(self.settings.value("referenciar_no_trabalho", False, type=bool))
+        self.chk_reref.toggled.connect(lambda on: self.settings.setValue("referenciar_no_trabalho", on))
+        v.addWidget(self.chk_reref)
         self.chk_sons = QCheckBox("Sons")
         self.chk_sons.setToolTip("Aviso sonoro ao iniciar, pausar, parar, terminar e em erro/alarme")
         self.chk_sons.setChecked(self.settings.value("sons_maquina", True, type=bool))
@@ -5632,7 +5855,7 @@ class MainWindow(QMainWindow):
         info = {**gc.analisar(texto), "tempo_s": tempo_s}
         if not self.ask_confirmar_trabalho(info, caixa):
             return False
-        if self.inicio_trabalho.currentData() == "atual":
+        if self._comecar_daqui():
             pos = c.posicao
             if pos is None:
                 return False
@@ -5868,7 +6091,7 @@ class MainWindow(QMainWindow):
                 on = False
         if c is not None and c.estado == cx.CONECTADO:
             c.habilitar_controle(on)
-            if on and self.chk_home_auto.isChecked():
+            if on and self.chk_home_auto.isChecked() and not self.rotativo.ativo:  # rotativo: Y sem fim de curso
                 self.referenciar_maquina()
         self.btn_controle.blockSignals(True)
         self.btn_controle.setChecked(on)
@@ -5888,6 +6111,9 @@ class MainWindow(QMainWindow):
 
     def referenciar_maquina(self):
         """Homing pelos fins de curso; ao terminar, o ponto de referência vira o 0,0 do trabalho."""
+        if self.rotativo.ativo:
+            self.show_error("Referenciar", MSG_REFERENCIAR_ROTATIVO)
+            return False
         c = self.conexao
         if c is None or not c.controle:
             self.statusBar().showMessage("Libere o controle da máquina primeiro.")
@@ -5912,8 +6138,17 @@ class MainWindow(QMainWindow):
         self._atualizar_maquina()
         return True
 
+    def _comecar_daqui(self) -> bool:
+        """Trabalho começa onde o cabeçote está? Com rotativo, SEMPRE (não existe 0,0 da mesa no eixo que gira)."""
+        return self.rotativo.ativo or self.inicio_trabalho.currentData() == "atual"
+
+    def _vel_movimento(self):
+        """Velocidade dos movimentos manuais/enquadrar: com rotativo, no máximo a velocidade de giro (não patina)."""
+        f = self.jog_vel.value()
+        return min(f, self.rotativo.vel_giro_max) if self.rotativo.ativo else f
+
     def _mover_cabecote(self, direcao, passo=None):
-        feed = self.jog_vel.value()
+        feed = self._vel_movimento()
         if direcao is None:
             return self._comando_maquina(lambda c: c.ir_para(0, 0, feed), "Indo para a origem (laser desligado).")
         passo = passo or self.jog_passo.currentData()
@@ -5983,7 +6218,7 @@ class MainWindow(QMainWindow):
         if not (0 <= x <= W and 0 <= y <= H) or not self._dentro_do_curso((x, y, x, y)):
             self.statusBar().showMessage("Ponto fora da mesa: o cabeçote não foi movido.")
             return False
-        return self._comando_maquina(lambda c: c.ir_para(x, y, self.jog_vel.value()),
+        return self._comando_maquina(lambda c: c.ir_para(x, y, self._vel_movimento()),
                                      f"Indo para X {x:.1f} Y {y:.1f} mm (laser desligado).".replace(".", ","))
 
     def _avisos_sonoros(self, c):
@@ -6118,8 +6353,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Enquadrar: nada para gravar (camadas com Saída ligada).")
             return False
         x0, y0, x1, y1 = caixa
-        feed = self.jog_vel.value()
-        daqui = self.inicio_trabalho.currentData() == "atual"
+        feed = self._vel_movimento()
+        daqui = self._comecar_daqui()
         c = self.conexao
         if c is not None:  # mesma checagem de curso do Iniciar
             pos = c.posicao
@@ -6151,6 +6386,16 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
         return r == QMessageBox.Yes
 
+    def _reref_s(self):
+        """Segundos entre referências no meio do trabalho, ou None (desmarcado, sem fim de curso ou com rotativo)."""
+        c = self.conexao
+        if not (getattr(self, "chk_reref", None) and self.chk_reref.isChecked()) or c is None:
+            return None
+        if self.rotativo.ativo or not c.tem_homing:
+            self.statusBar().showMessage("Referenciar no trabalho ignorado: precisa de fim de curso e sem rotativo.")
+            return None
+        return REREF_MIN * 60.0
+
     def iniciar_trabalho(self, escolher_faixa=False):
         c = self.conexao
         if c is None or not c.controle:
@@ -6176,7 +6421,7 @@ class MainWindow(QMainWindow):
             return False
         desenho, caixa = caixa, self._caixa_na_saida(caixa)  # caixa nas coordenadas que o G-code usa
         dx = dy = 0.0
-        if self.inicio_trabalho.currentData() == "atual":  # o canto do trabalho vai para onde o cabeçote está
+        if self._comecar_daqui():  # o canto do trabalho vai para onde o cabeçote está
             pos = c.posicao
             if pos is None:
                 self.show_error("Trabalho não iniciado", "Posição do cabeçote ainda desconhecida; espere um instante.")
@@ -6187,8 +6432,9 @@ class MainWindow(QMainWindow):
         if not self._dentro_do_curso(caixa):
             return False
         self._mapa_cabecote = self._mapa_saida_para_desenho(desenho, dx, dy)
-        ok = self._comando_maquina(lambda c: c.iniciar_trabalho(texto), "Trabalho enviado à máquina.")
+        ok = self._comando_maquina(lambda c: c.iniciar_trabalho(texto, self._reref_s()), "Trabalho enviado à máquina.")
         if ok:
+            self._aba_do_trabalho = (self.pagina_atual, self.nomes_paginas[self.pagina_atual], c._job)
             self._gravar_trabalho(c._job, 0)
             if ler_pref(self.settings, "tela_corte_auto"):
                 self.act_tela_corte.setChecked(True)
@@ -6237,6 +6483,7 @@ class MainWindow(QMainWindow):
             self._t0, self._pausado, self._pausa_ini, self._fim = time.monotonic(), 0.0, None, None
             self._trechos, self._trilha_i = tt.trechos_com_laser(job), 0
             self.tela_corte.vista.limpar_trilha()
+        self._marcar_aba_do_trabalho(c)
         prev = getattr(self, "_prev", None)
         rodando = c.trabalho in (cx.TRABALHO_RODANDO, cx.TRABALHO_PAUSADO)
         if prev is None or not (rodando or self._fim is not None or c.trabalho in (cx.TRABALHO_FIM, cx.TRABALHO_ERRO)):
@@ -6378,9 +6625,11 @@ class MainWindow(QMainWindow):
         novo = gc.retomar_de(linhas, k)
         prefixo = len(novo) - (len(linhas) - k)
         self._mapa_cabecote = None  # coordenadas já são as da máquina
-        ok = self._comando_maquina(lambda c: c.iniciar_trabalho("\n".join(novo)),
+        ok = self._comando_maquina(lambda c: c.iniciar_trabalho("\n".join(novo), self._reref_s()),
                                    f"Retomando da linha {k} de {len(linhas)}…")
         if ok:
+            if getattr(self, "_aba_do_trabalho", None) is not None:  # retomou a aba desta sessão: terminar marca ela
+                self._aba_do_trabalho = (*self._aba_do_trabalho[:2], c._job)
             self._prog = {**prog, "base": k - prefixo, "ok": k, "t": 0.0}
             self._escrever_progresso()
         return ok
@@ -6498,6 +6747,15 @@ class MainWindow(QMainWindow):
         return r == QMessageBox.Yes
 
     def _dentro_do_curso(self, caixa):
+        if self.rotativo.ativo and self.conexao and self.conexao.info.valor(20, 0) == 1:
+            # GRBL com limite por software confere o eixo do rotativo contra o curso da mesa e trava no meio do giro
+            self.show_error("Rotativo × limite de curso ($20=1)",
+                            "A placa está com o limite de curso por software LIGADO ($20=1). Com o rotativo, o eixo "
+                            f"{self.rotativo.eixo} gira a peça e passa do tamanho da mesa: o GRBL entra em ALARME no "
+                            "meio da gravação.\n\nPara usar o rotativo: Laser → Rotativo: liberar GRBL ($20=0). Quando "
+                            "voltar para a mesa normal: Laser → Rotativo: religar limite de curso ($20=1). "
+                            "Nada foi enviado.")
+            return False
         if self.rotativo.ativo:  # o eixo que gira a peça não tem fim de curso: só o outro conta
             x0, y0, x1, y1 = caixa
             caixa = (x0, y0, x0, y1) if self.rotativo.eixo == "X" else (x0, y0, x1, y0)
@@ -6534,7 +6792,8 @@ class MainWindow(QMainWindow):
             c = self.conexao
             if texto and c.estado == cx.CONECTADO and not c._fila and c._atual is None:
                 self._trabalho_pendente = None
-                self._comando_maquina(lambda c: c.iniciar_trabalho(texto), "Trabalho enviado à máquina.")
+                self._comando_maquina(lambda c: c.iniciar_trabalho(texto, self._reref_s()),
+                                      "Trabalho enviado à máquina.")
             self._atualizar_maquina()
 
     def _atualizar_maquina(self):

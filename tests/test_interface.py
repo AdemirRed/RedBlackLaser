@@ -57,7 +57,7 @@ class InterfaceTest(unittest.TestCase):
         acts = [a for a in w.laser_menu.actions()
                 if not a.isSeparator() and a not in (w.act_preview, w.act_gcode, w.act_matriz, w.act_precisao, w.act_cal_xy, w.act_comp_x,
                                                        w.act_resultado,
-                                                       w.act_rotativo, w.act_maquina)]
+                                                       w.act_rotativo, w.act_rot_teste1, w.act_rot_teste2, w.act_rot_corrigir, w.act_rot_liberar, w.act_rot_religar, w.act_rot_volta, w.act_maquina)]
         self.assertTrue(acts and all(not a.isEnabled() for a in acts), [a.text() for a in acts if a.isEnabled()])
         self.assertNotIn("PySide6.QtSerialPort", sys.modules)
         w.close()

@@ -91,6 +91,19 @@ class ControleTest(unittest.TestCase):
         self.assertTrue(self.sim.emitindo)  # retomar religa
         self.c.parar()
 
+    def test_pausa_que_o_firmware_nao_apaga_vira_reset(self):
+        """Firmware que ignora 0x9E: laser M3 ficaria aceso parado na pausa — repete 3x e então reseta."""
+        original = self.sim._tempo_real
+        self.sim._tempo_real = lambda b: None if b == 0x9E else original(b)
+        self.c.habilitar_controle(True)
+        self.c.iniciar_trabalho("G21\nG90\nM3 S850\nG1 X100 Y0 F600\nG1 X100 Y50\n")  # sem M5: o simulador o aplica ao ler
+        rodar(self.c, 1.0)
+        self.c.pausar()
+        rodar(self.c, 4.0)
+        self.assertEqual(self.tr.escrito.count(bytes([0x9E])), 3)
+        self.assertIn(bytes([0x18]), self.tr.escrito)  # desistiu e resetou
+        self.assertFalse(self.sim.emitindo)
+
     def test_pausar_retomar_e_parar_durante_trabalho(self):
         self.c.habilitar_controle(True)
         self.c.iniciar_trabalho("G21\nG90\nM4 S500\nG1 X100 Y0 F600\nG1 X100 Y50\nM5\n")
@@ -156,6 +169,36 @@ class ControleTest(unittest.TestCase):
         self.assertEqual(tuple(round(v, 3) for v in self.c.posicao), (12.0, 7.0))
         self.c._receber("<Idle|MPos:20.000,10.000,0.000|FS:0,0|WCO:5.000,2.000,0.000>")
         self.assertEqual(self.c.posicao, (15.0, 8.0))  # posição do trabalho = máquina − origem
+
+
+class ReferenciaNoTrabalhoTest(unittest.TestCase):
+    def test_referencia_no_meio_e_continua(self):
+        """A cada X s o envio para num deslocamento sem laser, espera Idle, faz $H, rearma o laser e continua."""
+        sim, tr, c = conectar({22: 1})
+        c.habilitar_controle(True)
+        c.desbloquear()
+        rodar(c, 0.5)
+        linhas = ["G21", "G90", "M4 S0"]
+        for i in range(60):  # 60 riscos de 20 mm a 1200 mm/min (1 s cada): mais que o planejador do GRBL guarda
+            linhas += [f"G0 X10 Y{i + 1}", f"G1 X30 Y{i + 1} S500 F1200"]
+        NL = "\n"
+        c.iniciar_trabalho(NL.join(linhas + ["M5"]) + NL, referenciar_a_cada_s=10.0)
+        escrito_antes = len(tr.escrito)
+        rodar(c, 150.0)
+        self.assertEqual(c.trabalho, cx.TRABALHO_FIM)
+        self.assertGreaterEqual(c.referencias_no_trabalho, 2)
+        depois = bytes(b for b in tr.escrito[escrito_antes:] if b != ord("?")).split(b"\n")  # "?" = status no meio
+        i_h = depois.index(b"$H")
+        self.assertEqual(depois[i_h + 1], b"M4")              # rearma o laser logo depois do $H
+        self.assertTrue(depois[i_h - 1].startswith(b"G1"))    # parou depois de um risco
+        self.assertTrue(depois[i_h + 2].startswith(b"G0"))    # e volta por um deslocamento sem laser
+        self.assertEqual(sum(ln.startswith(b"G1 X30") for ln in depois), 60)  # nada pulado nem repetido
+
+    def test_sem_fim_de_curso_recusa(self):
+        sim, tr, c = conectar()
+        c.habilitar_controle(True)
+        with self.assertRaises(cx.ComandoProibido):
+            c.iniciar_trabalho("G0 X1 Y1\n", referenciar_a_cada_s=600)
 
 
 if __name__ == "__main__":

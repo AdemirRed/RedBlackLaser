@@ -79,8 +79,8 @@ def caminho(d):
 
 def ler(pdf):
     """[(página 1|2, path mm, camada)] das duas chapas."""
-    doc = pymupdf.open(pdf)
-    return [(n, caminho(d), _camada(d["color"])) for n in (1, 2) for d in doc[n].get_drawings()]
+    with pymupdf.open(pdf) as doc:  # aberto e esquecido estoura o limite de ~509 arquivos do processo (testes)
+        return [(n, caminho(d), _camada(d["color"])) for n in (1, 2) for d in doc[n].get_drawings()]
 
 
 FAIXAS_PDF = {"Apollo": QPointF(185.0, 303.0), "Emily": QPointF(185.0, 348.0)}  # centro da faixa de cima / de baixo

@@ -393,10 +393,11 @@ class SimuladorGrbl:
     def status(self) -> str:
         feed = 0 if not self.planner or self.hold else self.planner[0].feed
         wx, wy = getattr(self, "wco", (0.0, 0.0))
+        acess = ("S" if self.spindle == "M3" and not self.laser_parado_ovr else "") + ("F" if self.ar else "")
         return (f"<{self.estado}|MPos:{self.pos[0]:.3f},{self.pos[1]:.3f},0.000|"
                 f"FS:{feed:g},{self.s if self.spindle != 'M5' else 0:g}|"
                 f"Bf:{PLANNER_BLOCOS - len(self.planner)},{RX_BYTES - len(self.rx)}"
-                + ("|Ov:100,100,100|A:F" if self.ar else "|Ov:100,100,100" if self._ar_avisar() else "")
+                + (f"|Ov:100,100,100|A:{acess}" if acess else "|Ov:100,100,100" if self._ar_avisar() else "")
                 + (f"|WCO:{wx:.3f},{wy:.3f},0.000" if (wx, wy) != (0.0, 0.0) or self._wco_avisar() else "") + ">")
 
     def _ar_avisar(self):  # como o GRBL: "Ov:" sem "A:" no relatório seguinte = acessórios desligados

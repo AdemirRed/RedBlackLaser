@@ -14,7 +14,7 @@ Leia isto inteiro ANTES de gerar qualquer projeto. As regras vêm do dono, que t
 | Potência | **NUNCA 100 %.** Máximo 85 % em qualquer camada |
 | Gravação de desenho (rostos, mechas, pregas) | preenchimento, **2000 mm/min, 35 %**, 1 passada, intervalo 0,1 |
 | Gravação fraca (códigos, marcas) | no mínimo 25 % a 3000 mm/min (a 10–15 % não aparece) |
-| Rebaixo (assento de peça colada por cima) | preenchimento, **1500 mm/min, 60 %, 1 passada** (2 passadas é demais) |
+| Rebaixo (assento de peça colada por cima) | preenchimento, **1500 mm/min, 60 %, 1 passada** (2 passadas é demais), intervalo **0,15 mm** (`maria_olivia.rebaixo_rapido`, ~1/3 mais rápido que 0,1). **NÃO** usar linhas a cada 1 mm + contorno para tirar com formão: testado em 19/11/2026, não deu certo e saiu desalinhado |
 | Folga do rebaixo | contorno da peça **+ 0,10 mm por lado** (sem folga ficou justo) |
 | Encaixe macho/fêmea (rasgo, lingueta) | **sem folga**: rasgo = soma das espessuras |
 | Margem | **2 mm** da borda da chapa e **2 mm** entre peças |
@@ -41,6 +41,17 @@ Leia isto inteiro ANTES de gerar qualquer projeto. As regras vêm do dono, que t
    a peça. O `presepio.folhas` já faz isso.
 8. **Não mudar a escala das peças** para "caber": reencaixe (nesting) as peças, nunca redimensione.
 9. **Não enviar nada para a máquina.** O dono confere e corta.
+10. **Nome do arquivo ≠ nome no porta-retrato:** "coloque o nome do cliente como X" é o nome do ARQUIVO; o nome
+    gravado/colado no projeto só muda se o dono disser explicitamente (no Douglas troquei o "Carine" por engano).
+    **Nome trocado (aplique cursivo), quando pedido:** use uma fonte cursiva instalada, não desenhe letras à mão** com Béziers (no
+    Douglas o Codex desenhou e o "g" virou um rabisco). Script MT Bold (`SCRIPTBL.TTF`) corta bem a ~200 mm de largura
+    (traço ≥ 2 mm). Funda as letras numa peça só (aproxime a maiúscula, engrosse 0,4 mm) e confira com
+    `scipy.ndimage.label`. Mantenha a proporção (nunca escale x e y diferente) e ponha o **pé das letras na linha do
+    nome original**: a borda onde o nome pousa costuma ser fina (9 mm no Carine V2) e logo abaixo é a janela da foto.
+    Letra com perna (g, j, p, q, y) passa por cima da foto: avise o dono. Depois de `addApplicationFont`, chame
+    `removeApplicationFont` (registrada, muda o texto dos outros testes).
+11. **Feche todo PDF que abrir** (`with pymupdf.open(...) as doc:`): o processo de testes só aguenta ~509 abertos e,
+    passando disso, testes de outros projetos falham com "Failed to open file" e fontes trocadas.
 
 ## 3. Ordem das camadas (sai nesta ordem)
 
@@ -58,7 +69,8 @@ existentes. Escolha o mais parecido:
 | `maria_olivia.py` | porta-retrato com aplicações coladas, rebaixos com folga, cabelo/vestido, gravação de detalhes |
 | `luana.py` | aplicações + rebaixo; tem `suavizar`, `_partes`, `_ret` (retângulo com cantos arredondados) |
 | `presepio.py` | casa de encaixe 3D, muitas peças; tem `ler` de PDF por cor, `encaixar` (nesting), `folhas`, `mapa_pdf`, `previa`, `silhueta`, `zonas_de_cor` |
-| `princesas.py` | PDF só com contornos (preto): separa contorno de fora × furos |
+| `princesas.py` | PDF só com contornos (preto): separa contorno de fora × furos; rebaixo de peça colada por cima pela posição do desenho de montagem (`MONTAGEM`, `_rebaixos`) |
+| `douglas.py` | porta-retrato com nome aplicado (peça do PDF levada à posição do desenho montado, rebaixo na borda), retrato em traços de linha (`retrato`: tira lixo e o que encosta no corte), talas de união no verso |
 | `presepio_manual.py`, `presepio_pintura.py` | manual de montagem e guia de pintura em PDF |
 
 Passos:

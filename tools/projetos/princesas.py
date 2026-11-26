@@ -15,8 +15,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import pymupdf  # noqa: E402
 from PySide6.QtCore import QRectF  # noqa: E402
-from PySide6.QtGui import QPainterPath  # noqa: E402
+from PySide6.QtGui import QPainterPath, QTransform  # noqa: E402
 
+import maria_olivia as mo  # noqa: E402
 import presepio as pr  # noqa: E402
 from apollo_emily import PT, caminho  # noqa: E402
 from redblack import camadas as cm  # noqa: E402
@@ -86,12 +87,47 @@ def ler(pdf):
     faltam = set(NOMES) - set(pecas)
     if faltam:
         raise ValueError(f"peças do mapa não encontradas: {sorted(faltam)}")
+    _rebaixos(pecas)
     return pecas
+
+
+# Montagem (desenho da pág. 1, medido nele): canto da caixa de cada peça na página do PDF -> canto na montagem, em mm,
+# com a origem no canto da caixa da moldura esquerda F1A. A silhueta D1 assenta 5 mm para dentro do contorno integrado;
+# a palavra D3 fica 6,5 mm sobre o topo da moldura (F1A, F1B e a régua C1), o resto sobe acima dela.
+MONTAGEM = {"F1A": ((6.0, 103.0), (0.0, 0.0)), "F1B": ((6.0, 115.0), (351.9157, 7.0)),
+            "C1": ((185.0, 115.0), (343.9157, 7.0)), "D1": ((170.0, 113.0), (4.9959, 5.0)),
+            "D3": ((6.0, 19.0), (192.4158, -52.5))}
+COLADAS = {"D1": ("F1A",), "D3": ("F1A", "F1B", "C1")}  # peça colada -> peças da base que recebem o rebaixo
+
+
+def _na_montagem(p, k):
+    de, para = MONTAGEM[k]
+    return QTransform.fromTranslate(para[0] - de[0], para[1] - de[1]).map(p)
+
+
+def _da_montagem(p, k):
+    de, para = MONTAGEM[k]
+    return QTransform.fromTranslate(de[0] - para[0], de[1] - para[1]).map(p)
+
+
+def _rebaixos(pecas):
+    """Rebaixo (assento) na base para D1 e D3, que vão coladas por cima: contorno da peça + 0,10 mm por lado, só onde
+    há MDF da base (D3 só no pedaço que pousa na moldura), sem detalhe pequeno. Entra como parte "rebaixo" (C10)."""
+    for cola, bases in COLADAS.items():
+        util = mo._area_util(pecas[cola]["cont"], [p for p, t in pecas[cola]["partes"] if t == "furo"])
+        assento = mo._rebaixo_limpo([_na_montagem(util, cola)])
+        for b in bases:
+            solido = mo._area_util(_na_montagem(pecas[b]["cont"], b),
+                                   [_na_montagem(p, b) for p, t in pecas[b]["partes"] if t == "furo"])
+            parte = assento.intersected(solido)
+            if parte.boundingRect().width() > 1.0 and parte.boundingRect().height() > 1.0:
+                pecas[b]["partes"].append((_da_montagem(parte, b), "rebaixo"))
 
 
 def _gerar(pdf, saida, mapa=None, png=None):
     pecas = ler(pdf)
     pr.NOMES.update(NOMES)  # o mapa e a prévia do presépio usam o nome pelo código
+    pr.TIPO_CAMADA["rebaixo"], pr.DESC["rebaixo"] = mo.REBAIXO, "rebaixo"
     pos = pr.encaixar(pecas, n_chapas=5)
     chapas = pr.folhas(pecas, pos)
     snaps = []
@@ -109,7 +145,7 @@ def _gerar(pdf, saida, mapa=None, png=None):
         snaps.append(tuple(grupos))
     ap = [pr.aproveitamento(c) for c in chapas]
     dentro = sorted(k for c in chapas for k, _p, d in c if d)
-    camadas = [c for c in pr.camadas() if c.id in (pr.CORTE_DENTRO_FURO, pr.CONT_DENTRO, pr.FURO, pr.CONT)]
+    camadas = [c for c in mo.camadas() if c.id != mo.DETALHE]  # C10 rebaixo + cortes (630 mm/min, 85 %, 2 passadas)
     notas = ("Porta-retrato Princesas — MDF 3 mm, 2 fotos 150 × 210 (PDF \"contorno integrado, sem pingo\"). "
              f"{len(pecas)} peças iguais ao PDF, reencaixadas em {len(chapas)} chapas de 365 × 370 mm, "
              f"{pr.MARGEM:g} mm da borda e {pr.VAO:g} mm entre peças.\n"
@@ -117,8 +153,10 @@ def _gerar(pdf, saida, mapa=None, png=None):
                        for i, (c, a) in enumerate(zip(chapas, ap)))
              + f"Peças dentro das janelas das fotos (sobra que vira peça): {', '.join(dentro) or 'nenhuma'}; "
              "cortam ANTES da janela (C05/C06).\n"
-             "Ordem: C05/C06 peças dentro de janelas → C02 janelas, coração e vazios → C01 contornos. "
-             "Cortes 650 mm/min, 85 %, 2 passadas.\n"
+             "REBAIXO (C10, gravado, sai 1º, 1500 mm/min 60 % 1 passada): assento da silhueta D1 em F1A e da palavra "
+             f"D3 em F1A, F1B e C1 (só onde pousa na moldura): contorno da peça + {mo.FOLGA:g} mm por lado.\n"
+             "Ordem: C10 rebaixos → C05/C06 peças dentro de janelas → C02 janelas, coração e vazios → C01 contornos. "
+             "Cortes 630 mm/min, 85 %, 2 passadas.\n"
              "Corte primeiro T1 e T2 (teste da emenda em V) e confira o encaixe. Montagem: guia do PDF (páginas 1–4).")
     nomes = [f"Chapa {i + 1}" for i in range(len(chapas))]
     pj.save(saida, snaps[0], camadas, notas=notas, paginas=[None] + [(s, (), ()) for s in snaps[1:]],
@@ -132,12 +170,13 @@ def _gerar(pdf, saida, mapa=None, png=None):
 
 def gerar(pdf, saida, mapa=None, png=None):
     """Gera o projeto; os nomes das peças do presépio (usados no mapa e na prévia) voltam como estavam."""
-    salvo = dict(pr.NOMES)
+    salvo, tipos, desc = dict(pr.NOMES), dict(pr.TIPO_CAMADA), dict(pr.DESC)
     try:
         return _gerar(pdf, saida, mapa, png)
     finally:
-        pr.NOMES.clear()
-        pr.NOMES.update(salvo)
+        for alvo, antes in ((pr.NOMES, salvo), (pr.TIPO_CAMADA, tipos), (pr.DESC, desc)):
+            alvo.clear()
+            alvo.update(antes)
 
 
 if __name__ == "__main__":

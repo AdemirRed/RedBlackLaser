@@ -61,7 +61,7 @@ class VarreduraTest(unittest.TestCase):
         self.assertTrue(all(abs(t.comprimento - 3) < 1e-9 and t.velocidade == 1200 for t in sobras))
         self.assertAlmostEqual(p.comprimento_corte, 20, 6)                  # o corte não muda
         texto = gc.gerar(p, [camada(sobrevarredura_mm=3, velocidade_mm_min=1200)])
-        self.assertEqual(texto.count(" S0"), 4 + 1)                         # 4 sobras + armar com S0
+        self.assertEqual(texto.count(" S0"), 4 + 1 + 1)  # 4 sobras + armar com S0 + troca de linha (G1 S0, não G0)
         self.assertTrue(gc.analisar(texto)["fim_desligado"])
         self.assertAlmostEqual(gc.analisar(texto)["comprimento_corte"], 20, 3)
 

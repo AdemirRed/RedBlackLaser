@@ -152,6 +152,10 @@ class Conexao:
     def tem_homing(self):
         return bool(self.info.valor(22, 0) or 0)
 
+    def limite_software(self, ligado=True):
+        """Grava $20=1 (ou 0): limite de curso por software. Rotativo precisa de 0 (o eixo gira sem fim)."""
+        self._linha_controle("$20=1" if ligado else "$20=0")
+
     def ativar_homing(self, ligado=True):
         """Grava $22=1 (ou 0) no controlador: liga o homing pelos fins de curso. A interface pede confirmação."""
         self._linha_controle("$22=1" if ligado else "$22=0")
@@ -212,6 +216,7 @@ class Conexao:
         self.tr.escrever(b"~")
         self._registrar("→", "[retomar]")
         self._apagar_na_pausa = False
+        self._pausa_tent = 0
         if self.trabalho == TRABALHO_PAUSADO:
             self.trabalho = TRABALHO_RODANDO
 
@@ -231,6 +236,7 @@ class Conexao:
             self.trabalho = TRABALHO_ERRO
             self._evento(f"Trabalho PARADO pelo usuário na linha {self.trabalho_ok} de {len(self._job)}.")
         self._job, self._job_i, self._job_pend, self._fila, self._atual = [], 0, deque(), [], None
+        self._reref_fase = None
 
     # ---------- trabalho ----------
     @staticmethod
@@ -246,8 +252,13 @@ class Conexao:
             out.append(ln)
         return out
 
-    def iniciar_trabalho(self, texto):
+    def iniciar_trabalho(self, texto, referenciar_a_cada_s=None):
+        """Envia o trabalho. Com `referenciar_a_cada_s` (máquina com fim de curso), a cada tanto tempo o envio para num
+        deslocamento SEM laser, espera a máquina parar, faz o $H e continua da mesma linha: passo perdido não se acumula.
+        A origem do trabalho (G54) fica gravada no controlador, então as coordenadas continuam valendo depois do $H."""
         self._exigir_controle()
+        if referenciar_a_cada_s and not self.tem_homing:
+            raise ComandoProibido("Referenciar durante o trabalho precisa de fim de curso ($22=1).")
         if self._fila or self._atual is not None:
             raise ComandoProibido("Espere os movimentos terminarem.")
         if self.status is not None and self.status.em_alarme:
@@ -258,7 +269,9 @@ class Conexao:
         self._job, self._job_i, self._job_pend = linhas, 0, deque()
         self.texto_trabalho = texto  # com os comentários: a tela mostra a camada de cada linha
         self.trabalho, self.trabalho_ok, self._esperando_fim = TRABALHO_RODANDO, 0, False
-        self._evento(f"Trabalho iniciado: {len(linhas)} linhas.")
+        self._reref_s, self._reref_fase, self._reref_t, self.referencias_no_trabalho = referenciar_a_cada_s, None, 0.0, 0
+        self._evento(f"Trabalho iniciado: {len(linhas)} linhas."
+                     + (f" Referência a cada {referenciar_a_cada_s / 60:g} min." if referenciar_a_cada_s else ""))
 
     @property
     def posicao(self):
@@ -304,8 +317,15 @@ class Conexao:
         return self.trabalho_ok / len(self._job) if self._job else 0.0
 
     def _alimentar_trabalho(self):
+        if getattr(self, "_reref_fase", None):
+            return  # parado para referenciar
         while self._job_i < len(self._job):
             ln = self._job[self._job_i]
+            if (self._reref_s and self._reref_t >= self._reref_s and self.trabalho == TRABALHO_RODANDO
+                    and _deslocamento_sem_laser(ln)):
+                self._reref_fase = "esvaziar"  # termina o que já está na máquina; o $H sai quando ela ficar Idle
+                self._evento("Pausa para referenciar: esperando a máquina terminar o que já recebeu…")
+                return
             if sum(self._job_pend) + len(ln) + 1 > RX_BUFFER:
                 break
             self.tr.escrever((ln + "\n").encode("ascii"))
@@ -332,6 +352,31 @@ class Conexao:
                          "(reset).")
             self._job_i = len(self._job)  # não envia mais nada
         return True
+
+    def _resposta_referencia(self, linha):
+        if linha != "ok":
+            self._reref_fase = None
+            self.tr.escrever(bytes([0x18]))
+            self.trabalho = TRABALHO_ERRO
+            self._job_i = len(self._job)
+            self._evento(f"Referência no meio do trabalho falhou ({linha}). Trabalho parado na linha "
+                         f"{self.trabalho_ok}; use Retomar interrompido depois de conferir os fins de curso.")
+        elif self._reref_fase == "home":
+            # rearma o laser no modo do trabalho (o S continua o mesmo): a próxima linha é um deslocamento sem laser
+            modo = next((ln.split()[0] for ln in reversed(self._job[:self._job_i]) if ln.split()[0] in ("M3", "M4")),
+                        None)
+            if modo:
+                self._reref_fase = "rearmar"
+                self.tr.escrever((modo + "\n").encode("ascii"))
+                return
+            self._reref_fase = None
+        else:
+            self._reref_fase = None
+        if self._reref_fase is None and self.trabalho != TRABALHO_ERRO:
+            self._reref_t = 0.0
+            self.referencias_no_trabalho += 1
+            self._evento(f"Referência feita ({self.referencias_no_trabalho}ª): continuando da linha {self.trabalho_ok + 1}.")
+            self._alimentar_trabalho()
 
     def consultar(self, cmd: str):
         """Agenda uma consulta somente leitura ($I, $$, $G)."""
@@ -377,7 +422,11 @@ class Conexao:
             elif self._t >= self.timeout_s:
                 self._falha(f"Sem resposta para {self._atual}.")
         elif self.estado == CONECTADO:
-            if self.trabalho in (TRABALHO_RODANDO, TRABALHO_PAUSADO):
+            if self.trabalho == TRABALHO_RODANDO and getattr(self, "_reref_s", None) and not self._reref_fase:
+                self._reref_t += dt
+            if getattr(self, "_reref_fase", None) == "home" and self._t >= TIMEOUT_HOMING_S:
+                self._resposta_referencia("sem resposta do $H")
+            elif self.trabalho in (TRABALHO_RODANDO, TRABALHO_PAUSADO):
                 self._alimentar_trabalho()
             elif self._atual is None and self._fila:
                 self._enviar(self._fila.pop(0))
@@ -409,7 +458,7 @@ class Conexao:
             if self.trabalho in (TRABALHO_RODANDO, TRABALHO_PAUSADO):
                 self.trabalho = TRABALHO_ERRO
                 self._evento("Controlador reiniciou durante o trabalho: nada foi retomado.")
-            self._job, self._job_i, self._job_pend = [], 0, deque()
+            self._job, self._job_i, self._job_pend, self._reref_fase = [], 0, deque(), None
             self._identificar()
             return
         st = grbl.status(linha)
@@ -419,6 +468,26 @@ class Conexao:
                 self._apagar_na_pausa = False
                 self.tr.escrever(bytes([0x9E]))  # GRBL 1.1: apaga o laser na pausa; o "~" religa ao retomar
                 self._registrar("→", "[apagar laser na pausa]")
+                self._pausa_tent, self._pausa_espera = 1, 0
+            elif self.trabalho == TRABALHO_PAUSADO and st.estado == "Hold:0" and "Ov" in st.campos \
+                    and getattr(self, "_pausa_tent", 0):
+                # Confere: o GRBL só manda "A:" com S/C se o laser/spindle ainda está ligado. 0x9E é um liga/desliga,
+                # então só repete com o laser comprovadamente aceso; se não apagar, reset (laser parado queima o material).
+                self._pausa_espera += 1
+                if not set(st.campos.get("A", "")) & {"S", "C"}:
+                    self._pausa_tent = 0
+                elif self._pausa_espera < 3:  # dá 2 relatórios para o comando anterior fazer efeito
+                    pass
+                elif self._pausa_tent < 3:
+                    self._pausa_tent += 1
+                    self._pausa_espera = 0
+                    self.tr.escrever(bytes([0x9E]))
+                    self._registrar("→", "[apagar laser na pausa — de novo]")
+                else:
+                    self._pausa_tent = 0
+                    self._evento("O controlador não apagou o laser na pausa: parei o trabalho (reset) para não queimar. "
+                                 "Use 'Retomar interrompido' para continuar.")
+                    self.parar()
             if "A" in st.campos or "Ov" in st.campos:  # o GRBL só manda "A:" junto do "Ov:", e só se algo ligou
                 self.ar_maquina = "F" in st.campos.get("A", "")
             if self._desbloquear_apos_parar and self.estado == CONECTADO:
@@ -432,6 +501,11 @@ class Conexao:
                 w = grbl._nums(st.campos["WCO"])
                 if w:
                     self.wco = w
+            if (getattr(self, "_reref_fase", None) == "esvaziar" and not self._job_pend and st.estado == "Idle"
+                    and self.trabalho == TRABALHO_RODANDO):
+                self._reref_fase, self._t = "home", 0.0
+                self.tr.escrever(b"$H\n")
+                self._registrar("→", "$H (referência no meio do trabalho)")
             if getattr(self, "_esperando_fim", False) and st.estado == "Idle" and self.trabalho == TRABALHO_RODANDO:
                 self._esperando_fim = False
                 self.trabalho = TRABALHO_FIM
@@ -449,6 +523,9 @@ class Conexao:
         elif linha.startswith("[OPT:"):
             self.info.opcoes = linha[5:-1]
         elif linha == "ok" or linha.startswith("error:"):
+            if getattr(self, "_reref_fase", None) in ("home", "rearmar") and not self._job_pend:
+                self._resposta_referencia(linha)
+                return
             if self.trabalho in (TRABALHO_RODANDO, TRABALHO_PAUSADO) and self._resposta_trabalho(linha):
                 return
             if self._atual is not None:
@@ -471,6 +548,7 @@ class Conexao:
                     self.ultimo_erro_comando = ""
                 self._atual, self._t = None, 0.0
         elif linha.startswith("ALARM:"):
+            self._reref_fase = None  # ex.: ALARM:9 = o $H não achou o fim de curso
             if self.trabalho in (TRABALHO_RODANDO, TRABALHO_PAUSADO):
                 self.trabalho = TRABALHO_ERRO
                 self._job_i = len(self._job)
@@ -509,6 +587,12 @@ class Conexao:
             self.tr.fechar()
         except TransporteErro:
             pass
+
+
+def _deslocamento_sem_laser(ln):
+    """Ponto seguro para parar e referenciar: G0 (laser apagado no modo laser) ou G1 com S0."""
+    p = ln.split()
+    return bool(p) and (p[0] == "G0" or (p[0] == "G1" and "S0" in p[1:]))
 
 
 def _com_trava(f):

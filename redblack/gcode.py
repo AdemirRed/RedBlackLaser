@@ -45,6 +45,7 @@ class PerfilGrbl:
 
 PERFIL_PADRAO = PerfilGrbl()
 CORTE_POT_MIN = 50.0  # % — camada em Linha a partir daqui é CORTE (M3 com corte_m3); abaixo é gravação de linha (M4)
+SALTO_GRAVACAO_MM = 30.0  # pulos de gravação até isto viram G1 S0 na velocidade da camada (não G0)
 _ORIGEM_TXT = {"inf_esq": "inferior esquerda", "sup_esq": "superior esquerda", "inf_dir": "inferior direita",
                "sup_dir": "superior direita"}
 PERFIL = PERFIL_PADRAO  # perfil em uso; muda por Configurações da máquina -> definir_perfil()
@@ -120,6 +121,7 @@ def gerar(percurso, camadas, perfil: PerfilGrbl | None = None, rotativo=None) ->
         from . import rotativo as rot
         ys = [doc_para_maquina(*p, W, H)[1] for t in percurso.trechos if t.tipo != "vazio" for p in t.pontos] or [0.0]
         tfy = rot.transformar_y(ys, rotativo)
+        volta_inicio = min(ys)  # começo do trabalho no eixo que gira (tfy(min) = min)
 
     def maquina(p):
         x, y = doc_para_maquina(p[0], p[1], W, H)
@@ -174,15 +176,50 @@ def gerar(percurso, camadas, perfil: PerfilGrbl | None = None, rotativo=None) ->
             f"{perfil.comando} S0 ; modo laser armado com potencia zero"]
     camada_atual, s_atual, f_atual, ar_atual = None, None, None, False
     cmd_atual = perfil.comando
+    ultimo = percurso.trechos[-1]
+    ki = 1 if (tfy is not None and rotativo.eixo == "Y") else 0  # índice do eixo que gira nos pontos de saída
+
+    def teto_giro(a, b, f):
+        """Rotativo: F que deixa o eixo que gira no máximo em vel_giro_max (a peça não patina)."""
+        if tfy is None or a is None:
+            return f
+        d_rot = abs(b[ki] - a[ki])
+        if d_rot < 1e-6:
+            return f
+        return max(10.0, min(f, round(rotativo.vel_giro_max * math.hypot(b[0] - a[0], b[1] - a[1]) / d_rot)))
+
+    pos = None  # último ponto escrito (saída)
     for t in percurso.trechos:
         pts = [maquina(p) for p in t.pontos]
+        if t.tipo == "vazio" and tfy is not None:
+            # deslocamento com rotativo: G1 sem laser e com teto de velocidade (G0 vai no máximo do GRBL e a peça
+            # patina; cada patinada tira a gravação do lugar)
+            fx, fy = pts[-1]
+            fim = t is ultimo
+            if fim:  # volta final: só até o começo do trabalho, não até o "Y0 da mesa" escalado
+                fx, fy = (fx, volta_inicio) if rotativo.eixo == "Y" else (volta_inicio, fy)
+            fv = teto_giro(pos, (fx, fy), perfil.f_max_mm_min) if pos is not None else rotativo.vel_giro_max
+            out.append(f"G1 X{_n(fx, k)} Y{_n(fy, k)} S0 F{fv:g}" + (" ; rotativo volta ao inicio do trabalho"
+                                                                      if fim else ""))
+            s_atual, f_atual, pos = 0, fv, (fx, fy)
+            continue
+        if (t.tipo == "vazio" and pos is not None and camada_atual in por_id
+                and por_id[camada_atual].modo == "preenchimento"
+                and math.hypot(pts[-1][0] - pos[0], pts[-1][1] - pos[1]) <= SALTO_GRAVACAO_MM):
+            # pulo curto dentro da gravação: G1 sem laser na velocidade da camada. Milhares de G0 (velocidade máxima
+            # do GRBL, vai-e-volta) fazem o motor perder passo: depois de 1 h a imagem "escorre" e bate no limite.
+            f = por_id[camada_atual].velocidade_mm_min
+            out.append(f"G1 X{_n(pts[-1][0], k)} Y{_n(pts[-1][1], k)} S0" + (f" F{f:g}" if f != f_atual else ""))
+            s_atual, f_atual, pos = 0, f, pts[-1]
+            continue
         if t.tipo == "vazio":
             out.append(f"G0 X{_n(pts[-1][0], k)} Y{_n(pts[-1][1], k)}")
+            pos = pts[-1]
             continue
         if t.tipo == "sobra":  # sobrevarredura: anda na velocidade da camada com o laser em zero
-            f = por_id[t.camada].velocidade_mm_min
+            f = teto_giro(pos, pts[-1], por_id[t.camada].velocidade_mm_min)
             out.append(f"G1 X{_n(pts[-1][0], k)} Y{_n(pts[-1][1], k)} S0" + (f" F{f:g}" if f != f_atual else ""))
-            s_atual, f_atual = 0, f
+            s_atual, f_atual, pos = 0, f, pts[-1]
             continue
         c = por_id[t.camada]
         if t.camada != camada_atual:
@@ -218,10 +255,19 @@ def gerar(percurso, camadas, perfil: PerfilGrbl | None = None, rotativo=None) ->
                     peso = min(1.0, seg / 2.0)
                     jx, jy = jx * (1 - peso) + abs(dx) / seg * peso, jy * (1 - peso) + abs(dy) / seg * peso
                     fi = velocidade_compensada(f, peso_x(jx, jy), perfil.comp_x_desconto, perfil.comp_x_minimo)
+            if tfy is not None:
+                # rotativo: o eixo que gira anda `fator` × a distância na superfície; o F vale para a distância de
+                # comando, então sem isto o trecho em volta da peça ficava mais lento (queimava mais) que o reto
+                sup = math.hypot(t.pontos[i + 1][0] - t.pontos[i][0], t.pontos[i + 1][1] - t.pontos[i][1])
+                cmd_d = math.hypot(x - pts[i][0], y - pts[i][1])
+                if sup > 1e-9 and abs(cmd_d - sup) > 1e-6:
+                    fi = min(perfil.f_max_mm_min, max(10.0, round(fi * cmd_d / sup / 10) * 10))
+                fi = teto_giro(pts[i], (x, y), fi)
             if fi != f_atual:
                 line += f" F{fi:g}"
                 f_atual = fi
             out.append(line)
+        pos = pts[-1]
     out += ["M5 ; laser desligado"] + (["M9 ; air assist desligado"] if ar_atual else []) + ["M2 ; fim do programa"]
     return "\n".join(out) + "\n"
 
